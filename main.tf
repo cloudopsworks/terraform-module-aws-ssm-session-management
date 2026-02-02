@@ -20,7 +20,7 @@ resource "aws_ssm_document" "session_manager" {
       s3EncryptionEnabled         = true
       cloudWatchLogGroupName      = aws_cloudwatch_log_group.this.name
       cloudWatchEncryptionEnabled = true
-      kmsKeyId                    = local.bucket_kms_key_arn
+      kmsKeyId                    = try(var.settings.kms.key_id, data.aws_kms_alias.existing[0].target_key_id, aws_kms_key.this[0].id)
       runAsEnabled                = false
       runAsDefaultUser            = ""
     }

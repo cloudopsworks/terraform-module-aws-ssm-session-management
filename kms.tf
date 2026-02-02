@@ -40,14 +40,14 @@ resource "aws_kms_key" "this" {
       {
         Effect = "Allow"
         Principal = {
-          Service = "ssm.${data.aws_region.current.id}.amazonaws.com"
+          Service = "logs.${data.aws_region.current.id}.amazonaws.com"
         }
         Action = [
           "kms:Encrypt",
           "kms:Decrypt",
           "kms:ReEncrypt*",
           "kms:GenerateDataKey*",
-          "kms:DescribeKey"
+          "kms:Describe*"
         ]
         Resource = "*"
         Condition = {
