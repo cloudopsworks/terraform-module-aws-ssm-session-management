@@ -61,6 +61,14 @@ resource "aws_kms_key" "this" {
         Principal = {
           AWS = var.settings.allowed_iam_role_arns
         }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:Describe*"
+        ]
+        Resource = "*"
       }] : []
     )
   })
