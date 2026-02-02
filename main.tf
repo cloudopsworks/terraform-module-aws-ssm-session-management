@@ -14,15 +14,18 @@ resource "aws_ssm_document" "session_manager" {
     schemaVersion = "1.0"
     description   = "Document to hold regional settings for Session Manager"
     sessionType   = "Standard_Stream"
-    "inputs" = {
+    inputs = {
       s3BucketName                = module.ssm_bucket.s3_bucket_id
       s3KeyPrefix                 = "session-manager/"
       s3EncryptionEnabled         = true
       cloudWatchLogGroupName      = aws_cloudwatch_log_group.this.name
       cloudWatchEncryptionEnabled = true
+      cloudWatchStreamingEnabled  = false
       kmsKeyId                    = try(var.settings.kms.key_id, data.aws_kms_alias.existing[0].target_key_id, aws_kms_key.this[0].id)
       runAsEnabled                = false
       runAsDefaultUser            = ""
+      idleSessionTimeout          = try(var.settings.session.timeout, 20)
+      maxSessionDuration          = try(var.settings.session.max_duration, 60)
     }
   })
   tags = local.all_tags
