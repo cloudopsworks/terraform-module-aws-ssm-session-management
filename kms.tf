@@ -7,6 +7,11 @@
 #     Distributed Under Apache v2.0 License
 #
 
+data "aws_kms_alias" {
+  count = !try(var.settings.kms.enabled, true) && try(var.settings.kms.key_alias, "") != "" ? 1 : 0
+  name  = var.settings.kms.key_alias
+}
+
 resource "aws_kms_key" "this" {
   count                   = try(var.settings.kms.enabled, true) ? 1 : 0
   description             = "KMS Key for SSM Documents managed by Session Management Module"
