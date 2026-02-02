@@ -27,7 +27,7 @@ resource "aws_kms_key" "this" {
   policy = jsonencode({
     Version = "2012-10-17"
     Id      = "key-default-1"
-    Statement = [
+    Statement = concat([
       {
         Sid    = "Allow Root Account Access"
         Effect = "Allow"
@@ -55,8 +55,14 @@ resource "aws_kms_key" "this" {
             "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:${local.audit_log_group_name}"
           }
         }
-      }
-    ]
+      }],
+      length(try(var.settings.allowed_iam_role_arns, [])) > 0 ? [{
+        Effect = "Allow"
+        Principal = {
+          AWS = var.settings.allowed_iam_role_arns
+        }
+      }] : []
+    )
   })
   tags = local.all_tags
 }
