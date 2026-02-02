@@ -13,7 +13,7 @@ resource "aws_ssm_document" "session_manager" {
   content = jsonencode({
     schemaVersion = "1.0"
     description   = "Document to hold regional settings for Session Manager"
-    sessionType   = "Session"
+    sessionType   = "Standard_Stream "
     "inputs" = {
       s3BucketName                = module.ssm_bucket.s3_bucket_id
       s3KeyPrefix                 = "session-manager/"
