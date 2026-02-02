@@ -7,8 +7,11 @@
 #     Distributed Under Apache v2.0 License
 #
 
+locals {
+  audit_log_group_name = "/aws/ssm/session-manager/audit-${local.system_name}"
+}
 resource "aws_cloudwatch_log_group" "this" {
-  name              = "/aws/ssm/session-manager/${local.system_name}"
+  name              = local.audit_log_group_name
   retention_in_days = try(var.settings.cloudwatch.retention, 7)
   skip_destroy      = true
   kms_key_id        = try(aws_kms_key.this[0].arn, null)

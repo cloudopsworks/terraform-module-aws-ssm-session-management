@@ -26,6 +26,25 @@ resource "aws_kms_key" "this" {
         }
         Action   = "kms:*"
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ssm.${data.aws_region.current.id}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:log-group:${local.audit_log_group_name}"
+          }
+        }
       }
     ]
   })
