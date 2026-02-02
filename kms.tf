@@ -7,9 +7,14 @@
 #     Distributed Under Apache v2.0 License
 #
 
-data "aws_kms_alias" {
+data "aws_kms_alias" "existing" {
   count = !try(var.settings.kms.enabled, true) && try(var.settings.kms.key_alias, "") != "" ? 1 : 0
   name  = var.settings.kms.key_alias
+}
+
+data "aws_kms_key" "existing" {
+  count  = !try(var.settings.kms.enabled, true) && try(var.settings.kms.key_id, "") != "" ? 1 : 0
+  key_id = var.settings.kms.key_id
 }
 
 resource "aws_kms_key" "this" {
