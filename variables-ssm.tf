@@ -6,3 +6,9 @@
 #       WebSite: https://cloudops.works
 #     Distributed Under Apache v2.0 License
 #
+
+variable "settings" {
+  description = "Settings for SSM Session Manager & SSM Fleet Manager"
+  type        = any
+  default     = {}
+}
