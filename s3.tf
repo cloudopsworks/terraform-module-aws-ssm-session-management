@@ -35,7 +35,7 @@ module "ssm_bucket" {
   attach_require_latest_tls_policy      = true
   attach_deny_insecure_transport_policy = true
   control_object_ownership              = true
-  object_ownership                      = "BucketOwner"
+  object_ownership                      = "BucketOwnerPreferred"
 
   versioning = {
     enabled = false
