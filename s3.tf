@@ -48,7 +48,10 @@ module "ssm_bucket" {
           "s3:PutObject",
           "s3:GetEncryptionConfiguration",
         ]
-        Resource = "*"
+        Resource = [
+          "arn:aws:s3:::${local.ssm_logs_bucket}/*",
+          "arn:aws:s3:::${local.ssm_logs_bucket}"
+        ]
       }
     ]
   }) : null
