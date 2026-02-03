@@ -18,7 +18,7 @@ resource "aws_ssm_document" "session_manager" {
       s3BucketName                = module.ssm_bucket.s3_bucket_id
       s3KeyPrefix                 = "session-manager/"
       s3EncryptionEnabled         = true
-      cloudWatchLogGroupName      = try(var.settings.cloudwatch.enabled, false) ? aws_cloudwatch_log_group.this.name : ""
+      cloudWatchLogGroupName      = try(var.settings.cloudwatch.enabled, false) ? aws_cloudwatch_log_group.this[0].name : ""
       cloudWatchEncryptionEnabled = try(var.settings.cloudwatch.enabled, false) ? true : false
       cloudWatchStreamingEnabled  = false
       kmsKeyId                    = try(var.settings.kms.key_id, data.aws_kms_alias.existing[0].target_key_id, aws_kms_key.this[0].id)
