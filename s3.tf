@@ -34,8 +34,29 @@ module "ssm_bucket" {
   attach_public_policy                  = true
   attach_require_latest_tls_policy      = true
   attach_deny_insecure_transport_policy = true
-  control_object_ownership              = true
-  object_ownership                      = "BucketOwnerPreferred"
+  attach_policy                         = length(try(var.settings.allowed_iam_role_arns, [])) > 0
+  policy = length(try(var.settings.allowed_iam_role_arns, [])) > 0 ? jsonencode({
+    version = "2012-10-17"
+    statement = [
+      {
+        Sid    = "AllowIAMRolesAccess"
+        Effect = "Allow"
+        Principal = {
+          AWS = var.settings.allowed_iam_role_arns
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:Describe*"
+        ]
+        Resource = "*"
+      }
+    ]
+  }) : null
+  control_object_ownership = true
+  object_ownership         = "BucketOwnerPreferred"
 
   versioning = {
     enabled = false

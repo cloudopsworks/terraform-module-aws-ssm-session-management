@@ -57,6 +57,7 @@ resource "aws_kms_key" "this" {
         }
       }],
       length(try(var.settings.allowed_iam_role_arns, [])) > 0 ? [{
+        Sid    = "AllowIAMRolesAccess"
         Effect = "Allow"
         Principal = {
           AWS = var.settings.allowed_iam_role_arns
