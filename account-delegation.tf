@@ -9,24 +9,24 @@
 
 resource "aws_organizations_delegated_administrator" "this" {
   count             = try(var.settings.organization.delegated, false) ? 1 : 0
-  account_id        = var.settings.organization .account_id
+  account_id        = var.settings.organization.account_id
   service_principal = "ssm.amazonaws.com"
 }
 
 resource "aws_organizations_delegated_administrator" "quick_setup" {
   count             = try(var.settings.organization.delegated, false) ? 1 : 0
-  account_id        = var.settings.organization .account_id
+  account_id        = var.settings.organization.account_id
   service_principal = "ssm-quicksetup.amazonaws.com"
 }
 
 resource "aws_organizations_delegated_administrator" "cloud_formation" {
   count             = try(var.settings.organization.delegated, false) ? 1 : 0
-  account_id        = var.settings.organization .account_id
+  account_id        = var.settings.organization.account_id
   service_principal = "member.org.stacksets.cloudformation.amazonaws.com"
 }
 
 resource "aws_organizations_delegated_administrator" "resource_explorer" {
   count             = try(var.settings.organization.delegated, false) ? 1 : 0
-  account_id        = var.settings.organization .account_id
+  account_id        = var.settings.organization.account_id
   service_principal = "resource-explorer-2.amazonaws.com"
 }
