@@ -14,9 +14,10 @@ locals {
       local.system_name,
       ],
       try(var.settings.bucket.random_suffix, true) ? [
-        "-",
-        random_string.random[0].result
+        "-"
       ] : []
+      ,
+      random_string.random.*.result
     )
   )
 
