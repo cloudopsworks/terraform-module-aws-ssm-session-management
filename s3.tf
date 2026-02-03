@@ -45,11 +45,8 @@ module "ssm_bucket" {
           AWS = var.settings.allowed_iam_role_arns
         }
         Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:Describe*"
+          "s3:PutObject",
+          "s3:GetEncryptionConfiguration",
         ]
         Resource = "*"
       }
