@@ -22,7 +22,7 @@ resource "aws_organizations_delegated_administrator" "quick_setup" {
 resource "aws_organizations_delegated_administrator" "cloud_formation" {
   count             = try(var.settings.organization.delegated, false) ? 1 : 0
   account_id        = var.settings.organization .account_id
-  service_principal = "hooks.cloudformation.amazonaws.com"
+  service_principal = "member.org.stacksets.cloudformation.amazonaws.com"
 }
 
 resource "aws_organizations_delegated_administrator" "resource_explorer" {
