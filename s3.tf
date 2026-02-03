@@ -25,7 +25,7 @@ locals {
 }
 
 resource "random_string" "random" {
-  count   = try(var.settings.random_bucket_suffix, true) && !try(var.settings.organization.delegated, false) && try(var.settings.bucket.name, "") != "" ? 1 : 0
+  count   = try(var.settings.random_bucket_suffix, true) && !try(var.settings.organization.delegated, false) && try(var.settings.bucket.name, "") = = "" ? 1 : 0
   length  = 8
   special = false
   lower   = true
