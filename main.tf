@@ -18,12 +18,12 @@ resource "aws_ssm_document" "session_manager" {
       s3BucketName                = module.ssm_bucket.s3_bucket_id
       s3KeyPrefix                 = "session-manager/"
       s3EncryptionEnabled         = true
-      cloudWatchLogGroupName      = aws_cloudwatch_log_group.this.name
-      cloudWatchEncryptionEnabled = true
+      cloudWatchLogGroupName      = try(var.settings.cloudwatch.enabled, false) ? aws_cloudwatch_log_group.this.name : ""
+      cloudWatchEncryptionEnabled = try(var.settings.cloudwatch.enabled, false) ? true : false
       cloudWatchStreamingEnabled  = false
       kmsKeyId                    = try(var.settings.kms.key_id, data.aws_kms_alias.existing[0].target_key_id, aws_kms_key.this[0].id)
       runAsEnabled                = false
-      runAsDefaultUser            = ""
+      runAsDefaultUser            = try(var.settings.session.run_as, "")
       idleSessionTimeout          = try(var.settings.session.timeout, 20)
       maxSessionDuration          = try(var.settings.session.max_duration, 60)
     }

@@ -11,6 +11,7 @@ locals {
   audit_log_group_name = "/aws/ssm/session-manager/audit-${local.system_name}"
 }
 resource "aws_cloudwatch_log_group" "this" {
+  count             = try(var.settings.cloudwatch.enabled, false) ? 1 : 0
   depends_on        = [aws_kms_key.this]
   name              = local.audit_log_group_name
   retention_in_days = try(var.settings.cloudwatch.retention, 7)
