@@ -18,7 +18,7 @@ data "aws_kms_key" "existing" {
 }
 
 resource "aws_kms_key" "this" {
-  count                   = try(var.settings.kms.enabled, true) && !try(var.settings.delegate.enabled, false) ? 1 : 0
+  count                   = try(var.settings.kms.enabled, true) && !try(var.settings.organization.delegated, false) ? 1 : 0
   description             = "KMS Key for SSM Documents managed by Session Management Module"
   deletion_window_in_days = try(var.settings.kms.deletion_window, 30)
   enable_key_rotation     = try(var.settings.kms.enable_key_rotation, true)
@@ -77,7 +77,7 @@ resource "aws_kms_key" "this" {
 }
 
 resource "aws_kms_alias" "this" {
-  count         = try(var.settings.kms.enabled, true) && !try(var.settings.delegate.enabled, false) ? 1 : 0
+  count         = try(var.settings.kms.enabled, true) && !try(var.settings.organization.delegated, false) ? 1 : 0
   target_key_id = aws_kms_key.this[0].key_id
   name          = format("alias/%s", try(var.settings.kms.alias_name, "ssm-session-mgmt-key-${local.system_name}"))
 }

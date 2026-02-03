@@ -8,7 +8,7 @@
 #
 
 resource "aws_organizations_delegated_administrator" "this" {
-  count             = try(var.settings.delegate.enabled, false) ? 1 : 0
+  count             = try(var.settings.organization.delegated, false) ? 1 : 0
   account_id        = var.settings.delegate.account_id
   service_principal = "ssm.amazonaws.com"
 }

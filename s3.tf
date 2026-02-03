@@ -13,7 +13,7 @@ locals {
 }
 
 resource "random_string" "random" {
-  count   = try(var.settings.random_bucket_suffix, true) && !try(var.settings.delegate.enabled, false) ? 1 : 0
+  count   = try(var.settings.random_bucket_suffix, true) && !try(var.settings.organization.delegated, false) ? 1 : 0
   length  = 8
   special = false
   lower   = true
@@ -24,7 +24,7 @@ resource "random_string" "random" {
 module "ssm_bucket" {
   source                                = "terraform-aws-modules/s3-bucket/aws"
   version                               = "~> 5.10"
-  create_bucket                         = !try(var.settings.delegate.enabled, false)
+  create_bucket                         = !try(var.settings.organization.delegated, false)
   bucket                                = local.ssm_logs_bucket
   acl                                   = "private"
   block_public_acls                     = true
