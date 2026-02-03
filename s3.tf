@@ -9,7 +9,7 @@
 
 locals {
   ssm_logs_bucket = try(var.settings.bucket.name, "") != "" ? var.settings.bucket.name : join("",
-    concat([
+    compact(concat([
       "ssm-session-auditlogs-",
       local.system_name,
       ],
@@ -18,7 +18,7 @@ locals {
       ] : []
       ,
       random_string.random.*.result
-    )
+    ))
   )
 
   kms_key_arn = try(data.aws_kms_key.existing[0].arn, data.aws_kms_alias.existing[0].target_key_arn, aws_kms_key.this[0].arn, "arn:aws:kms:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:alias/aws/s3")
