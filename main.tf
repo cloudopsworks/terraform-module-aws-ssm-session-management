@@ -8,6 +8,7 @@
 #
 
 resource "aws_ssm_document" "session_manager" {
+  count         = !try(var.settings.organization.delegated, false) ? 1 : 0
   name          = "SSM-SessionManagerRunShell"
   document_type = "Session"
   content = jsonencode({
