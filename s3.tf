@@ -8,12 +8,24 @@
 #
 
 locals {
-  ssm_logs_bucket = try(var.settings.random_bucket_suffix, true) ? "ssm-session-auditlogs-${local.system_name}-${random_string.random[0].result}" : "ssm-session-auditlogs-${local.system_name}"
-  kms_key_arn     = try(data.aws_kms_key.existing[0].arn, data.aws_kms_alias.existing[0].target_key_arn, aws_kms_key.this[0].arn, "arn:aws:kms:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:alias/aws/s3")
+  ssm_logs_bucket = try(var.settings.bucket.name, "") != "" ? var.settings.bucket.name : join("",
+    compact(concat([
+      "ssm-session-auditlogs-",
+      local.system_name,
+      ],
+      try(var.settings.bucket.random_suffix, true) ? [
+        "-"
+      ] : []
+      ,
+      random_string.random.*.result
+    ))
+  )
+
+  kms_key_arn = try(data.aws_kms_key.existing[0].arn, data.aws_kms_alias.existing[0].target_key_arn, aws_kms_key.this[0].arn, "arn:aws:kms:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:alias/aws/s3")
 }
 
 resource "random_string" "random" {
-  count   = try(var.settings.random_bucket_suffix, true) ? 1 : 0
+  count   = try(var.settings.random_bucket_suffix, true) && !try(var.settings.organization.delegated, false) && try(var.settings.bucket.name, "") == "" ? 1 : 0
   length  = 8
   special = false
   lower   = true
@@ -21,10 +33,10 @@ resource "random_string" "random" {
   numeric = true
 }
 
-
 module "ssm_bucket" {
   source                                = "terraform-aws-modules/s3-bucket/aws"
   version                               = "~> 5.10"
+  create_bucket                         = !try(var.settings.organization.delegated, false)
   bucket                                = local.ssm_logs_bucket
   acl                                   = "private"
   block_public_acls                     = true
