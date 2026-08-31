@@ -4,12 +4,14 @@
 | ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.3 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.35 |
+| <a name="requirement_awscc"></a> [awscc](#requirement\_awscc) | >= 1.40 |
 
 ## Providers
 
 | Name | Version |
 | ---- | ------- |
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 6.62.0 |
+| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | 1.99.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 
 ## Modules
@@ -38,6 +40,7 @@
 | [aws_ssm_document.session_manager](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
 | [aws_ssm_resource_data_sync.inventory](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_resource_data_sync) | resource |
 | [aws_ssm_service_setting.default_host_management](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_service_setting) | resource |
+| [awscc_ssmguiconnect_preferences.remote_desktop](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmguiconnect_preferences) | resource |
 | [random_string.random](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_iam_role.allowed](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_role) | data source |
@@ -76,6 +79,8 @@
 | <a name="output_kms_key_alias"></a> [kms\_key\_alias](#output\_kms\_key\_alias) | Alias of the KMS key created by this module. Empty when the module does not create a key. |
 | <a name="output_kms_key_arn"></a> [kms\_key\_arn](#output\_kms\_key\_arn) | ARN of the KMS key used to encrypt session data. Empty when no customer managed key is in use. |
 | <a name="output_kms_key_id"></a> [kms\_key\_id](#output\_kms\_key\_id) | Key ID of the KMS key used to encrypt session data, whether created by this module or supplied. Empty when no customer managed key is in use. |
+| <a name="output_remote_desktop_recording_bucket"></a> [remote\_desktop\_recording\_bucket](#output\_remote\_desktop\_recording\_bucket) | Name of the S3 bucket receiving Fleet Manager Remote Desktop connection recordings. Empty when RDP recording is disabled. |
+| <a name="output_remote_desktop_recording_kms_key_arn"></a> [remote\_desktop\_recording\_kms\_key\_arn](#output\_remote\_desktop\_recording\_kms\_key\_arn) | ARN of the KMS key used to encrypt Remote Desktop recordings while Systems Manager processes them. Empty when RDP recording is disabled. |
 | <a name="output_resource_data_sync_bucket"></a> [resource\_data\_sync\_bucket](#output\_resource\_data\_sync\_bucket) | Name of the S3 bucket receiving synchronised Inventory data. Empty when resource data sync is disabled. |
 | <a name="output_resource_data_sync_name"></a> [resource\_data\_sync\_name](#output\_resource\_data\_sync\_name) | Name of the Inventory resource data sync. Empty when resource data sync is disabled. |
 | <a name="output_resource_data_sync_prefix"></a> [resource\_data\_sync\_prefix](#output\_resource\_data\_sync\_prefix) | Key prefix under which resource data sync writes Inventory data. Empty when resource data sync is disabled or writes to the bucket root. |

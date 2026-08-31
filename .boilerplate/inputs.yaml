@@ -80,6 +80,13 @@ settings:
   #     files: ""                                 # (Optional) JSON string selecting files to inventory, e.g. '[{"Path":"/usr/bin","Pattern":["*ssm*"],"Recursive":false}]'. Only sent when non-empty. Default: ""
   #     windows_registry: ""                      # (Optional) JSON string selecting Windows registry keys to inventory, e.g. '[{"Path":"HKEY_LOCAL_MACHINE\\SOFTWARE\\Amazon\\MachineImage","ValueNames":["AMIName"]}]'. Only sent when non-empty. Default: ""
   #
+  #   remote_desktop:                             # (Optional) Fleet Manager Remote Desktop. Connections otherwise inherit the Session Manager preferences configured above — recording is the only separately configurable setting.
+  #     recording:                                # (Optional) RDP connection recording, uploaded to S3 by the ssm-guiconnect service principal. Console equivalent: Settings, Just-in-time node access, RDP recording.
+  #       enabled: false                          # (Optional) Record RDP connections. Requires a symmetric customer managed KMS key. Default: false
+  #       bucket_name: ""                         # (Optional) Destination bucket. Leave empty to use this module's audit bucket, in which case the required bucket policy statement and KMS grant are added automatically. When set, that bucket's policy is the caller's responsibility. Default: ""
+  #       bucket_owner: ""                        # (Optional) Account ID owning the destination bucket. Default: "" (the current account)
+  #       kms_key_arn: ""                         # (Optional) Symmetric encrypt/decrypt customer managed key used to encrypt the recording while Systems Manager processes it, in the same Region as the node. Default: "" (this module's key)
+  #
   #   resource_data_sync:                         # (Optional) Aggregates the collected Inventory into an S3 bucket so it can be queried with Athena. Managed from Fleet Manager, Account management, Resource data sync.
   #     enabled: false                            # (Optional) Create the resource data sync. Default: false
   #     name: ""                                  # (Optional) Name of the sync. Default: "ssm-inventory-<system-name>"

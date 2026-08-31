@@ -81,6 +81,27 @@ locals {
           "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:ssm:*:${data.aws_caller_identity.current.account_id}:resource-data-sync/*"
         }
       }
+    }] : [],
+    # Fleet Manager Remote Desktop recordings are uploaded by the GUI Connect service
+    # principal. The preferences schema carries no key prefix, so the grant has to cover the
+    # bucket as a whole — which is also why the session log lifecycle rule above is scoped
+    # to its own prefix rather than left bucket-wide.
+    local.rdp_recording_uses_audit_bucket ? [{
+      Sid    = "ConnectionRecording"
+      Effect = "Allow"
+      Principal = {
+        Service = "ssm-guiconnect.amazonaws.com"
+      }
+      Action = "s3:PutObject"
+      Resource = [
+        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}",
+        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}/*"
+      ]
+      Condition = {
+        StringEquals = {
+          "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+        }
+      }
     }] : []
   )
 

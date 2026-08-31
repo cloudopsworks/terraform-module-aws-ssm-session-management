@@ -15,7 +15,7 @@
  [![Latest Release](https://img.shields.io/github/release/cloudopsworks/terraform-module-aws-ssm-session-management.svg?style=for-the-badge)](https://github.com/cloudopsworks/terraform-module-aws-ssm-session-management/releases/latest) [![Last Updated](https://img.shields.io/github/last-commit/cloudopsworks/terraform-module-aws-ssm-session-management.svg?style=for-the-badge)](https://github.com/cloudopsworks/terraform-module-aws-ssm-session-management/commits)
 
 
-This module sets up AWS SSM Session Manager and Fleet Manager settings, including S3 bucket for audit logs, CloudWatch Log Group, KMS encryption for both, Default Host Management Configuration, Inventory collection and resource data sync.
+This module sets up AWS SSM Session Manager and Fleet Manager settings, including S3 bucket for audit logs, CloudWatch Log Group, KMS encryption for both, Default Host Management Configuration, Inventory collection, resource data sync and Remote Desktop connection recording.
 
 
 ---
@@ -67,8 +67,12 @@ All of it is opt-in and account and Region wide:
   audit bucket this module already manages and adding the bucket policy and KMS grants the service
   requires.
 
-Fleet Manager Remote Desktop needs no configuration of its own: RDP connections apply the same Session
-Manager preferences written to the `SSM-SessionManagerRunShell` document.
+- **Remote Desktop connection recording** records RDP connections to S3. This is the only separately
+  configurable Remote Desktop setting — a connection otherwise applies the same Session Manager
+  preferences written to the `SSM-SessionManagerRunShell` document.
+
+Recording preferences are exposed only through Cloud Control, so the module also requires the `awscc`
+provider. Nothing from that provider is created unless recording is turned on.
 
 It also runs in a second, mutually exclusive mode: when `settings.organization.delegated` is `true` the
 module creates **only** the SSM delegated administrator registrations in the Organizations management
@@ -183,6 +187,13 @@ settings:
   #     windows_updates: "Enabled"                # (Optional) Collect installed Windows updates. Windows only. Values: Enabled, Disabled. Default: "Enabled"
   #     files: ""                                 # (Optional) JSON string selecting files to inventory. Only sent when non-empty. Default: ""
   #     windows_registry: ""                      # (Optional) JSON string selecting Windows registry keys to inventory. Only sent when non-empty. Default: ""
+  #
+  #   remote_desktop:                           # (Optional) Fleet Manager Remote Desktop. Connections otherwise inherit the Session Manager preferences configured above — recording is the only separately configurable setting.
+  #     recording:                              # (Optional) RDP connection recording, uploaded to S3 by the ssm-guiconnect service principal.
+  #       enabled: false                        # (Optional) Record RDP connections. Requires a symmetric customer managed KMS key. Default: false
+  #       bucket_name: ""                       # (Optional) Destination bucket. Leave empty to use this module's audit bucket, in which case the required bucket policy statement and KMS grant are added automatically. Default: ""
+  #       bucket_owner: ""                      # (Optional) Account ID owning the destination bucket. Default: "" (the current account)
+  #       kms_key_arn: ""                       # (Optional) Symmetric encrypt/decrypt customer managed key used to encrypt the recording while Systems Manager processes it. Default: "" (this module's key)
   #
   #   resource_data_sync:                         # (Optional) Aggregates the collected Inventory into an S3 bucket so it can be queried with Athena.
   #     enabled: false                            # (Optional) Create the resource data sync. Default: false
@@ -406,6 +417,53 @@ settings:
       files: '[{"Path":"/usr/bin","Pattern":["*ssm*"],"Recursive":false}]'
 ```
 
+### Recording Remote Desktop connections
+
+Records Fleet Manager RDP connections to S3. Leaving `bucket_name` empty sends them to the audit bucket
+this module already manages, and the `ssm-guiconnect` bucket policy statement and KMS grant are added
+for you.
+
+```yaml
+settings:
+  kms:
+    enabled: true
+  fleet_manager:
+    enabled: true
+    remote_desktop:
+      recording:
+        enabled: true
+```
+
+Recording requires a symmetric, encrypt/decrypt customer managed key; the key this module creates
+qualifies. To send recordings elsewhere, name the bucket and take on its policy yourself:
+
+```yaml
+settings:
+  fleet_manager:
+    enabled: true
+    remote_desktop:
+      recording:
+        enabled: true
+        bucket_name: "my-central-rdp-recordings"
+        bucket_owner: "123456789012"
+        kms_key_arn: "arn:aws:kms:us-east-1:123456789012:key/abcd1234-..."
+```
+
+Three things to know:
+
+- **This is the only Remote Desktop setting there is.** Connection duration, idle timeout and
+  concurrency are fixed service behaviours, and everything else about an RDP session comes from the
+  Session Manager preferences under `settings.session`.
+- **Recordings are not covered by the audit lifecycle rule.** The preferences schema carries no key
+  prefix, so the module cannot scope a rule to them; video recordings will accumulate until you add
+  your own lifecycle policy.
+- **Operators need their own permissions.** Configuring recording requires
+  `ssm-guiconnect:UpdateConnectionRecordingPreferences` and `kms:CreateGrant`; connecting requires
+  `ssm-guiconnect:StartConnection` and `kms:CreateGrant` on the recording key. This module grants
+  neither — they belong to the human or role making the connection. If you use just-in-time node
+  access, AWS additionally requires the KMS key to carry the tag
+  `SystemsManagerJustInTimeNodeAccessManaged=true`, which you can add through `extra_tags`.
+
 ### Delegation mode
 
 Applied against the Organizations management account. Creates only the delegated administrator
@@ -438,12 +496,14 @@ Available targets:
 | ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.3 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.35 |
+| <a name="requirement_awscc"></a> [awscc](#requirement\_awscc) | >= 1.40 |
 
 ## Providers
 
 | Name | Version |
 | ---- | ------- |
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 6.62.0 |
+| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | 1.99.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 
 ## Modules
@@ -472,6 +532,7 @@ Available targets:
 | [aws_ssm_document.session_manager](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
 | [aws_ssm_resource_data_sync.inventory](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_resource_data_sync) | resource |
 | [aws_ssm_service_setting.default_host_management](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_service_setting) | resource |
+| [awscc_ssmguiconnect_preferences.remote_desktop](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmguiconnect_preferences) | resource |
 | [random_string.random](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_iam_role.allowed](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_role) | data source |
@@ -510,6 +571,8 @@ Available targets:
 | <a name="output_kms_key_alias"></a> [kms\_key\_alias](#output\_kms\_key\_alias) | Alias of the KMS key created by this module. Empty when the module does not create a key. |
 | <a name="output_kms_key_arn"></a> [kms\_key\_arn](#output\_kms\_key\_arn) | ARN of the KMS key used to encrypt session data. Empty when no customer managed key is in use. |
 | <a name="output_kms_key_id"></a> [kms\_key\_id](#output\_kms\_key\_id) | Key ID of the KMS key used to encrypt session data, whether created by this module or supplied. Empty when no customer managed key is in use. |
+| <a name="output_remote_desktop_recording_bucket"></a> [remote\_desktop\_recording\_bucket](#output\_remote\_desktop\_recording\_bucket) | Name of the S3 bucket receiving Fleet Manager Remote Desktop connection recordings. Empty when RDP recording is disabled. |
+| <a name="output_remote_desktop_recording_kms_key_arn"></a> [remote\_desktop\_recording\_kms\_key\_arn](#output\_remote\_desktop\_recording\_kms\_key\_arn) | ARN of the KMS key used to encrypt Remote Desktop recordings while Systems Manager processes them. Empty when RDP recording is disabled. |
 | <a name="output_resource_data_sync_bucket"></a> [resource\_data\_sync\_bucket](#output\_resource\_data\_sync\_bucket) | Name of the S3 bucket receiving synchronised Inventory data. Empty when resource data sync is disabled. |
 | <a name="output_resource_data_sync_name"></a> [resource\_data\_sync\_name](#output\_resource\_data\_sync\_name) | Name of the Inventory resource data sync. Empty when resource data sync is disabled. |
 | <a name="output_resource_data_sync_prefix"></a> [resource\_data\_sync\_prefix](#output\_resource\_data\_sync\_prefix) | Key prefix under which resource data sync writes Inventory data. Empty when resource data sync is disabled or writes to the bucket root. |

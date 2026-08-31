@@ -271,3 +271,67 @@ resource "aws_ssm_resource_data_sync" "inventory" {
   # policy must exist first.
   depends_on = [module.ssm_bucket]
 }
+
+##
+# Remote Desktop connection recording
+#
+# Fleet Manager Remote Desktop otherwise needs no configuration of its own: an RDP
+# connection applies the same Session Manager preferences written to the
+# SSM-SessionManagerRunShell document. Recording is the one thing that is separately
+# configurable, and it is exposed only through Cloud Control, hence the awscc provider.
+#
+# The console reaches these settings under Settings, Just-in-time node access, RDP
+# recording. Recordings are written by the ssm-guiconnect service principal, which is why
+# the audit bucket policy and the KMS key policy both need statements of their own.
+##
+locals {
+  rdp_recording_enabled = local.fleet_manager_enabled && try(var.settings.fleet_manager.remote_desktop.recording.enabled, false)
+
+  # Same plan-time reasoning as the resource data sync: the bucket and key policies switch
+  # on this, so it is derived from configuration and never from the resolved bucket name.
+  rdp_recording_uses_audit_bucket = local.rdp_recording_enabled && try(var.settings.fleet_manager.remote_desktop.recording.bucket_name, "") == ""
+
+  rdp_recording_bucket = local.rdp_recording_uses_audit_bucket ? local.ssm_logs_bucket : try(var.settings.fleet_manager.remote_desktop.recording.bucket_name, "")
+
+  rdp_recording_bucket_owner = try(var.settings.fleet_manager.remote_desktop.recording.bucket_owner, "") != "" ? var.settings.fleet_manager.remote_desktop.recording.bucket_owner : data.aws_caller_identity.current.account_id
+
+  # GUI Connect uses this key to encrypt the recording while it is still being processed on
+  # Systems Manager resources, before it lands in S3. It must be a symmetric customer
+  # managed key with encrypt/decrypt usage, in the same Region as the node.
+  rdp_recording_uses_module_key = local.rdp_recording_enabled && local.has_kms_key && try(var.settings.fleet_manager.remote_desktop.recording.kms_key_arn, "") == ""
+
+  rdp_recording_kms_key_arn = try(var.settings.fleet_manager.remote_desktop.recording.kms_key_arn, "") != "" ? var.settings.fleet_manager.remote_desktop.recording.kms_key_arn : (
+    local.rdp_recording_uses_module_key ? local.kms_key_arn : ""
+  )
+
+  # The bucket's own SSE-KMS key needs a separate grant, scoped through S3, so that
+  # ssm-guiconnect can write an encrypted object into it. That is only this module's to add
+  # when the recording lands in the audit bucket and that bucket is encrypted with our key.
+  rdp_recording_needs_bucket_key_grant = local.rdp_recording_uses_audit_bucket && local.has_kms_key
+}
+
+resource "awscc_ssmguiconnect_preferences" "remote_desktop" {
+  count = local.rdp_recording_enabled ? 1 : 0
+
+  connection_recording_preferences = {
+    kms_key_arn = local.rdp_recording_kms_key_arn
+    recording_destinations = {
+      # The schema accepts exactly one bucket, minimum and maximum alike.
+      s3_buckets = [{
+        bucket_name  = local.rdp_recording_bucket
+        bucket_owner = local.rdp_recording_bucket_owner
+      }]
+    }
+  }
+
+  # Recording fails asynchronously with a ProcessingError rather than a clear error at
+  # connection time when the destination policies are not in place yet.
+  depends_on = [module.ssm_bucket]
+
+  lifecycle {
+    precondition {
+      condition     = local.rdp_recording_kms_key_arn != ""
+      error_message = "settings.fleet_manager.remote_desktop.recording requires a customer managed KMS key. Either leave settings.kms.enabled at its default so this module creates one, supply settings.kms.key_id or settings.kms.key_alias, or set settings.fleet_manager.remote_desktop.recording.kms_key_arn explicitly."
+    }
+  }
+}

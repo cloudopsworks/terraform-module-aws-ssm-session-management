@@ -107,6 +107,16 @@ output "resource_data_sync_prefix" {
   value       = local.resource_data_sync_enabled ? local.resource_data_sync_prefix : ""
 }
 
+output "remote_desktop_recording_bucket" {
+  description = "Name of the S3 bucket receiving Fleet Manager Remote Desktop connection recordings. Empty when RDP recording is disabled."
+  value       = local.rdp_recording_enabled ? local.rdp_recording_bucket : ""
+}
+
+output "remote_desktop_recording_kms_key_arn" {
+  description = "ARN of the KMS key used to encrypt Remote Desktop recordings while Systems Manager processes them. Empty when RDP recording is disabled."
+  value       = local.rdp_recording_enabled ? local.rdp_recording_kms_key_arn : ""
+}
+
 output "delegated_administrator_account_id" {
   description = "Account ID registered as SSM delegated administrator. Empty when delegation mode is disabled."
   value       = try(aws_organizations_delegated_administrator.this[0].account_id, "")

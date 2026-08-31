@@ -72,6 +72,12 @@
 #       windows_updates: "Enabled"                  # (Optional) Collect installed Windows updates. Windows only. Values: Enabled, Disabled. Default: "Enabled"
 #       files: ""                                   # (Optional) JSON string selecting files to inventory, e.g. '[{"Path":"/usr/bin","Pattern":["*ssm*"],"Recursive":false}]'. Only sent when non-empty. Default: ""
 #       windows_registry: ""                        # (Optional) JSON string selecting Windows registry keys to inventory. Only sent when non-empty. Default: ""
+#     remote_desktop:                               # (Optional) Fleet Manager Remote Desktop. Connections otherwise inherit the Session Manager preferences above; recording is the only separately configurable setting.
+#       recording:                                  # (Optional) RDP connection recording, written to S3 by the ssm-guiconnect service principal. Console equivalent: Settings, Just-in-time node access, RDP recording.
+#         enabled: false                            # (Optional) Whether to record RDP connections. Requires a customer managed KMS key. Default: false
+#         bucket_name: ""                           # (Optional) Destination bucket. When empty this module's audit bucket is used and the required bucket policy and KMS grants are added automatically; when set, that bucket's policy is the caller's responsibility. Default: ""
+#         bucket_owner: ""                          # (Optional) Account ID owning the destination bucket. Default: "" (the current account)
+#         kms_key_arn: ""                           # (Optional) Symmetric encrypt/decrypt customer managed key used to encrypt the recording while Systems Manager processes it, in the same region as the node. Default: "" (this module's key)
 #     resource_data_sync:                           # (Optional) Aggregates the collected Inventory into an S3 bucket for querying with Athena.
 #       enabled: false                              # (Optional) Whether to create the resource data sync. Default: false
 #       name: ""                                    # (Optional) Name of the sync. Default: "ssm-inventory-${local.system_name}"
@@ -137,5 +143,17 @@ variable "settings" {
       ] : contains(["Enabled", "Disabled"], try(var.settings.fleet_manager.inventory[key], "Enabled"))
     ])
     error_message = "Every settings.fleet_manager.inventory collection category must be either \"Enabled\" or \"Disabled\"."
+  }
+
+  # Mirrors the has_kms_key local: GUI Connect will not record without a customer managed
+  # key, and catching it here beats a failure at connection time.
+  validation {
+    condition = !try(var.settings.fleet_manager.remote_desktop.recording.enabled, false) || (
+      try(var.settings.fleet_manager.remote_desktop.recording.kms_key_arn, "") != "" ||
+      try(var.settings.kms.enabled, true) ||
+      try(var.settings.kms.key_id, "") != "" ||
+      try(var.settings.kms.key_alias, "") != ""
+    )
+    error_message = "settings.fleet_manager.remote_desktop.recording requires a customer managed KMS key. Leave settings.kms.enabled at its default, supply settings.kms.key_id or settings.kms.key_alias, or set settings.fleet_manager.remote_desktop.recording.kms_key_arn."
   }
 }
