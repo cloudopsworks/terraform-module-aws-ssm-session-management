@@ -15,7 +15,7 @@
  [![Latest Release](https://img.shields.io/github/release/cloudopsworks/terraform-module-aws-ssm-session-management.svg?style=for-the-badge)](https://github.com/cloudopsworks/terraform-module-aws-ssm-session-management/releases/latest) [![Last Updated](https://img.shields.io/github/last-commit/cloudopsworks/terraform-module-aws-ssm-session-management.svg?style=for-the-badge)](https://github.com/cloudopsworks/terraform-module-aws-ssm-session-management/commits)
 
 
-This module sets up AWS SSM Session Manager settings, including S3 bucket for audit logs, CloudWatch Log Group, and KMS encryption for both.
+This module sets up AWS SSM Session Manager and Fleet Manager settings, including S3 bucket for audit logs, CloudWatch Log Group, KMS encryption for both, Default Host Management Configuration, Inventory collection and resource data sync.
 
 
 ---
@@ -53,9 +53,26 @@ preferences, an encrypted S3 bucket with a tiered lifecycle policy for audit log
 log group, and the KMS key protecting both. Roles that need to write audit logs may be granted access by
 ARN or by role name.
 
+Under `settings.fleet_manager` the module also configures the Fleet Manager side of Systems Manager.
+All of it is opt-in and account and Region wide:
+
+- **Default Host Management Configuration** creates the service role Systems Manager assumes and flips
+  the `/ssm/managed-instance/default-ec2-instance-management-role` service setting, so every EC2
+  instance in the account and Region becomes a managed node without an instance profile. The role is
+  also granted write access to this module's audit bucket, KMS key and log group, so nodes adopted this
+  way can log their sessions without further configuration.
+- **Inventory collection** creates the `AWS-GatherSoftwareInventory` association that populates the
+  Fleet Manager node detail views.
+- **Resource data sync** aggregates that Inventory into S3 for querying with Athena, defaulting to the
+  audit bucket this module already manages and adding the bucket policy and KMS grants the service
+  requires.
+
+Fleet Manager Remote Desktop needs no configuration of its own: RDP connections apply the same Session
+Manager preferences written to the `SSM-SessionManagerRunShell` document.
+
 It also runs in a second, mutually exclusive mode: when `settings.organization.delegated` is `true` the
 module creates **only** the SSM delegated administrator registrations in the Organizations management
-account, and none of the session logging resources.
+account, and none of the session logging or Fleet Manager resources.
 
 ## Usage
 
@@ -124,7 +141,7 @@ settings:
     #   windows: ""                               # (Optional) Shell commands to run when a Windows session starts. Default: ""
 
   audit:                                          # (Optional) Audit log retention settings for S3
-    # s3_key_prefix: "session-manager/"           # (Optional) Key prefix for session logs written to the bucket. Default: "session-manager/"
+    # s3_key_prefix: "session-manager/"           # (Optional) Key prefix for session logs written to the bucket. The lifecycle rule below is scoped to this prefix, so other data sharing the bucket is left alone. Default: "session-manager/"
     transition_days: 30                           # (Optional) Days before transitioning logs to STANDARD_IA. STANDARD_IA bills a 128 KB minimum per object, which can cost more than STANDARD for small session logs. Default: 30
     archive_days: 60                              # (Optional) Days before transitioning logs to GLACIER. Default: 60
     retention_years: 5                            # (Optional) Years to retain logs before expiration. Default: 5
@@ -134,6 +151,46 @@ settings:
     enabled: false                                # (Optional) Enable CloudWatch logging of sessions. Default: false
     # retention: 7                                # (Optional) Log retention in days. Default: 7
     # streaming: false                            # (Optional) Stream session output continuously instead of writing on session end. Default: false
+
+  # fleet_manager:                                # (Optional) Fleet Manager settings. All of these are account and Region wide, and are ignored in delegation mode.
+  #   enabled: false                              # (Optional) Master toggle for this whole block. Nothing below is created unless this is true. Default: false
+  #
+  #   default_host_management:                    # (Optional) Default Host Management Configuration — lets Systems Manager manage every EC2 instance in this account and Region as a managed node, with no instance profile.
+  #     enabled: false                            # (Optional) Turn on Default Host Management Configuration. Instances need IMDSv2 and SSM Agent 3.2.582.0 or later. Default: false
+  #     create_role: true                         # (Optional) Create the IAM role. Set to false to point the setting at a role managed elsewhere. Default: true
+  #     role_name: ""                             # (Optional) Name of the IAM role Systems Manager assumes. Default: "AWSSystemsManagerDefaultEC2InstanceManagementRole"
+  #     role_path: "/service-role/"               # (Optional) IAM path of that role, leading and trailing slash included. Default: "/service-role/"
+  #     additional_policy_arns: []                # (Optional) Extra managed policy ARNs attached to the created role. These apply to every managed instance in the Region. Default: []
+  #     session_logging_access: true              # (Optional) Attach an inline policy letting managed nodes write session logs to this module's audit bucket, KMS key and log group. Ignored when create_role is false. Default: true
+  #
+  #   inventory:                                  # (Optional) Inventory collection — populates the Fleet Manager node detail views. Systems Manager permits only one inventory association per node.
+  #     enabled: false                            # (Optional) Create the AWS-GatherSoftwareInventory association. Default: false
+  #     schedule: "rate(1 day)"                   # (Optional) Rate or cron expression for the collection schedule, minimum 30 minutes. Default: "rate(1 day)"
+  #     association_name: ""                      # (Optional) Name of the State Manager association, 3-128 characters of [A-Za-z0-9_.-]. Default: "ssm-inventory-<system-name>"
+  #     apply_only_at_cron_interval: false        # (Optional) Skip the immediate run on apply and wait for the first scheduled interval. Default: false
+  #     max_concurrency: ""                       # (Optional) Nodes to run against at once, as a number or a percentage such as "10%". Default: "" (unset, AWS decides)
+  #     max_errors: ""                            # (Optional) Errors tolerated before the association stops, as a number or a percentage. Default: "" (unset, AWS decides)
+  #     targets:                                  # (Optional) Up to 5 target blocks. Default: every managed node, as below.
+  #       - key: "InstanceIds"                    # (Required within targets) Target key, e.g. "InstanceIds", "tag:Environment", "resource-groups:Name".
+  #         values: ["*"]                         # (Required within targets) Values for that key.
+  #     applications: "Enabled"                   # (Optional) Collect installed application metadata. Values: Enabled, Disabled. Default: "Enabled"
+  #     aws_components: "Enabled"                 # (Optional) Collect AWS component metadata such as amazon-ssm-agent. Values: Enabled, Disabled. Default: "Enabled"
+  #     custom_inventory: "Enabled"               # (Optional) Collect custom inventory metadata. Values: Enabled, Disabled. Default: "Enabled"
+  #     instance_detailed_information: "Enabled"  # (Optional) Collect CPU model, speed and core count. Values: Enabled, Disabled. Default: "Enabled"
+  #     network_config: "Enabled"                 # (Optional) Collect network configuration metadata. Values: Enabled, Disabled. Default: "Enabled"
+  #     services: "Enabled"                       # (Optional) Collect Windows service configuration. Windows only. Values: Enabled, Disabled. Default: "Enabled"
+  #     windows_roles: "Enabled"                  # (Optional) Collect Windows roles. Windows only. Values: Enabled, Disabled. Default: "Enabled"
+  #     windows_updates: "Enabled"                # (Optional) Collect installed Windows updates. Windows only. Values: Enabled, Disabled. Default: "Enabled"
+  #     files: ""                                 # (Optional) JSON string selecting files to inventory. Only sent when non-empty. Default: ""
+  #     windows_registry: ""                      # (Optional) JSON string selecting Windows registry keys to inventory. Only sent when non-empty. Default: ""
+  #
+  #   resource_data_sync:                         # (Optional) Aggregates the collected Inventory into an S3 bucket so it can be queried with Athena.
+  #     enabled: false                            # (Optional) Create the resource data sync. Default: false
+  #     name: ""                                  # (Optional) Name of the sync. Default: "ssm-inventory-<system-name>"
+  #     bucket_name: ""                           # (Optional) Destination bucket. Leave empty to use this module's own audit bucket, in which case the required bucket policy statements and KMS grants are added automatically. Default: ""
+  #     prefix: "inventory"                       # (Optional) Key prefix for the synchronised data. Set to "" to write at the bucket root. Default: "inventory"
+  #     region: ""                                # (Optional) Region of the destination bucket. Default: "" (the region this module is applied in)
+  #     kms_key_arn: ""                           # (Optional) KMS key ARN used to encrypt the synchronised data. Default: "" (this module's key when the audit bucket is the destination)
 ```
 
 ### Generated `terragrunt.hcl`
@@ -186,7 +243,8 @@ inputs = {
 
 1. Create the deployment directory and run `terragrunt scaffold github.com/cloudopsworks/terraform-module-aws-ssm-session-management` inside it.
 2. Edit `inputs.yaml`; the defaults are usable as-is for a first deployment.
-3. Add the instance roles that will write session logs under `settings.allowed_iam_role_names`.
+3. Add the instance roles that will write session logs under `settings.allowed_iam_role_names`, or turn on
+   `settings.fleet_manager.default_host_management` to adopt the fleet without instance profiles instead.
 4. Run `terragrunt plan` to review the resources to be created.
 5. Run `terragrunt apply` to deploy the configuration.
 
@@ -281,6 +339,73 @@ settings:
       linux: "cd /var/log && echo 'Session started'"
 ```
 
+### Adopting a fleet with Default Host Management Configuration
+
+Turns every EC2 instance in this account and Region into a managed node without an instance profile,
+and grants the role Systems Manager assumes write access to this module's audit bucket, KMS key and log
+group. Instances must run IMDSv2 and SSM Agent 3.2.582.0 or later; an instance profile that already
+allows `ssm:UpdateInstanceInformation` takes precedence and keeps that instance off DHMC.
+
+```yaml
+settings:
+  cloudwatch:
+    enabled: true
+  fleet_manager:
+    enabled: true
+    default_host_management:
+      enabled: true
+      additional_policy_arns:
+        - "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+```
+
+With this in place `settings.allowed_iam_role_names` is usually unnecessary — the nodes get their audit
+bucket access from the Default Host Management Configuration role rather than from an instance profile.
+
+### Inventory collection and resource data sync
+
+Inventory is what fills in the Fleet Manager node detail views. The resource data sync then aggregates
+it into S3 so it can be queried with Athena; leaving `bucket_name` empty sends it to the audit bucket
+this module already manages, and the required bucket policy statements and KMS grants are added for you.
+
+```yaml
+settings:
+  fleet_manager:
+    enabled: true
+    inventory:
+      enabled: true
+      schedule: "rate(12 hours)"
+      max_concurrency: "10%"
+      max_errors: "5%"
+    resource_data_sync:
+      enabled: true
+      prefix: "inventory"
+```
+
+Two things to know before turning Inventory on:
+
+- **One association per node.** Systems Manager rejects a second inventory association covering a node
+  that already has one, so an account that was set up from the console needs that association removed
+  or imported first.
+- **The audit lifecycle rule is scoped to `settings.audit.s3_key_prefix`.** Session logs still transition
+  and expire on schedule; Inventory data sharing the bucket stays in STANDARD so it remains queryable.
+
+Narrow the collection with targets and per-category toggles:
+
+```yaml
+settings:
+  fleet_manager:
+    enabled: true
+    inventory:
+      enabled: true
+      targets:
+        - key: "tag:Environment"
+          values: ["production"]
+      windows_updates: "Disabled"
+      windows_roles: "Disabled"
+      services: "Disabled"
+      files: '[{"Path":"/usr/bin","Pattern":["*ssm*"],"Recursive":false}]'
+```
+
 ### Delegation mode
 
 Applied against the Organizations management account. Creates only the delegated administrator
@@ -310,36 +435,43 @@ Available targets:
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.3 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.35 |
 
 ## Providers
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="provider_aws"></a> [aws](#provider\_aws) | 6.62.0 |
 | <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 
 ## Modules
 
 | Name | Source | Version |
-|------|--------|---------|
+| ---- | ------ | ------- |
 | <a name="module_ssm_bucket"></a> [ssm\_bucket](#module\_ssm\_bucket) | terraform-aws-modules/s3-bucket/aws | ~> 5.10 |
 | <a name="module_tags"></a> [tags](#module\_tags) | cloudopsworks/tags/local | 1.0.10 |
 
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [aws_cloudwatch_log_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
+| [aws_iam_role.default_host_management](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy.default_host_management_session_logging](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy_attachment.default_host_management](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_role_policy_attachment.default_host_management_additional](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_kms_alias.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_alias) | resource |
 | [aws_kms_key.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
 | [aws_organizations_delegated_administrator.cloud_formation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/organizations_delegated_administrator) | resource |
 | [aws_organizations_delegated_administrator.quick_setup](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/organizations_delegated_administrator) | resource |
 | [aws_organizations_delegated_administrator.resource_explorer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/organizations_delegated_administrator) | resource |
 | [aws_organizations_delegated_administrator.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/organizations_delegated_administrator) | resource |
+| [aws_ssm_association.inventory](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_association) | resource |
 | [aws_ssm_document.session_manager](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
+| [aws_ssm_resource_data_sync.inventory](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_resource_data_sync) | resource |
+| [aws_ssm_service_setting.default_host_management](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_service_setting) | resource |
 | [random_string.random](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_iam_role.allowed](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_role) | data source |
@@ -352,7 +484,7 @@ Available targets:
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_extra_tags"></a> [extra\_tags](#input\_extra\_tags) | Extra tags to add to the resources | `map(string)` | `{}` | no |
 | <a name="input_is_hub"></a> [is\_hub](#input\_is\_hub) | Is this a hub or spoke configuration? | `bool` | `false` | no |
 | <a name="input_org"></a> [org](#input\_org) | Organization details | <pre>object({<br/>    organization_name = string<br/>    organization_unit = string<br/>    environment_type  = string<br/>    environment_name  = string<br/>  })</pre> | n/a | yes |
@@ -362,17 +494,25 @@ Available targets:
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_allowed_iam_role_arns"></a> [allowed\_iam\_role\_arns](#output\_allowed\_iam\_role\_arns) | Resolved list of IAM role ARNs granted access to the audit bucket and KMS key, merging settings.allowed\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.allowed\_iam\_role\_names. |
 | <a name="output_audit_bucket_arn"></a> [audit\_bucket\_arn](#output\_audit\_bucket\_arn) | ARN of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
 | <a name="output_audit_bucket_id"></a> [audit\_bucket\_id](#output\_audit\_bucket\_id) | Name of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
 | <a name="output_audit_bucket_key_prefix"></a> [audit\_bucket\_key\_prefix](#output\_audit\_bucket\_key\_prefix) | Key prefix under which Session Manager writes audit logs in the bucket. |
 | <a name="output_cloudwatch_log_group_arn"></a> [cloudwatch\_log\_group\_arn](#output\_cloudwatch\_log\_group\_arn) | ARN of the CloudWatch log group receiving session logs. Empty when CloudWatch logging is disabled. |
 | <a name="output_cloudwatch_log_group_name"></a> [cloudwatch\_log\_group\_name](#output\_cloudwatch\_log\_group\_name) | Name of the CloudWatch log group receiving session logs. Empty when CloudWatch logging is disabled. |
+| <a name="output_default_host_management_role_arn"></a> [default\_host\_management\_role\_arn](#output\_default\_host\_management\_role\_arn) | ARN of the IAM role Systems Manager assumes for Default Host Management Configuration. Empty when the module does not create the role. |
+| <a name="output_default_host_management_role_name"></a> [default\_host\_management\_role\_name](#output\_default\_host\_management\_role\_name) | Name of the IAM role Systems Manager assumes for Default Host Management Configuration. Empty when the module does not create the role. |
+| <a name="output_default_host_management_setting_value"></a> [default\_host\_management\_setting\_value](#output\_default\_host\_management\_setting\_value) | Value written to the Default Host Management Configuration service setting, as the role path and name Systems Manager expects. Empty when Default Host Management Configuration is disabled. |
 | <a name="output_delegated_administrator_account_id"></a> [delegated\_administrator\_account\_id](#output\_delegated\_administrator\_account\_id) | Account ID registered as SSM delegated administrator. Empty when delegation mode is disabled. |
+| <a name="output_inventory_association_id"></a> [inventory\_association\_id](#output\_inventory\_association\_id) | ID of the State Manager association running AWS-GatherSoftwareInventory. Empty when Inventory collection is disabled. |
+| <a name="output_inventory_association_name"></a> [inventory\_association\_name](#output\_inventory\_association\_name) | Name of the State Manager association running AWS-GatherSoftwareInventory. Empty when Inventory collection is disabled. |
 | <a name="output_kms_key_alias"></a> [kms\_key\_alias](#output\_kms\_key\_alias) | Alias of the KMS key created by this module. Empty when the module does not create a key. |
 | <a name="output_kms_key_arn"></a> [kms\_key\_arn](#output\_kms\_key\_arn) | ARN of the KMS key used to encrypt session data. Empty when no customer managed key is in use. |
 | <a name="output_kms_key_id"></a> [kms\_key\_id](#output\_kms\_key\_id) | Key ID of the KMS key used to encrypt session data, whether created by this module or supplied. Empty when no customer managed key is in use. |
+| <a name="output_resource_data_sync_bucket"></a> [resource\_data\_sync\_bucket](#output\_resource\_data\_sync\_bucket) | Name of the S3 bucket receiving synchronised Inventory data. Empty when resource data sync is disabled. |
+| <a name="output_resource_data_sync_name"></a> [resource\_data\_sync\_name](#output\_resource\_data\_sync\_name) | Name of the Inventory resource data sync. Empty when resource data sync is disabled. |
+| <a name="output_resource_data_sync_prefix"></a> [resource\_data\_sync\_prefix](#output\_resource\_data\_sync\_prefix) | Key prefix under which resource data sync writes Inventory data. Empty when resource data sync is disabled or writes to the bucket root. |
 | <a name="output_session_document_arn"></a> [session\_document\_arn](#output\_session\_document\_arn) | ARN of the SSM Session document holding the regional Session Manager preferences. Empty in delegation mode. |
 | <a name="output_session_document_name"></a> [session\_document\_name](#output\_session\_document\_name) | Name of the SSM Session document holding the regional Session Manager preferences. Empty in delegation mode. |
 

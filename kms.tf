@@ -82,6 +82,28 @@ resource "aws_kms_key" "this" {
           }
         }
       }] : [],
+      # Resource data sync writes Inventory data as the service principal rather than as a
+      # role in this account, so the key policy has to grant it directly.
+      local.resource_data_sync_uses_module_key ? [{
+        Sid    = "AllowSSMResourceDataSyncAccess"
+        Effect = "Allow"
+        Principal = {
+          Service = "ssm.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:Describe*"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      }] : [],
       local.has_allowed_iam_roles ? [{
         Sid    = "AllowIAMRolesAccess"
         Effect = "Allow"

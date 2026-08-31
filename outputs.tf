@@ -24,7 +24,7 @@ output "audit_bucket_arn" {
 
 output "audit_bucket_key_prefix" {
   description = "Key prefix under which Session Manager writes audit logs in the bucket."
-  value       = try(var.settings.audit.s3_key_prefix, "session-manager/")
+  value       = local.audit_s3_key_prefix
 }
 
 output "kms_key_id" {
@@ -65,6 +65,46 @@ output "session_document_arn" {
 output "allowed_iam_role_arns" {
   description = "Resolved list of IAM role ARNs granted access to the audit bucket and KMS key, merging settings.allowed_iam_role_arns with the exact names and wildcard patterns resolved from settings.allowed_iam_role_names."
   value       = local.allowed_iam_role_arns
+}
+
+output "default_host_management_role_name" {
+  description = "Name of the IAM role Systems Manager assumes for Default Host Management Configuration. Empty when the module does not create the role."
+  value       = try(aws_iam_role.default_host_management[0].name, "")
+}
+
+output "default_host_management_role_arn" {
+  description = "ARN of the IAM role Systems Manager assumes for Default Host Management Configuration. Empty when the module does not create the role."
+  value       = try(aws_iam_role.default_host_management[0].arn, "")
+}
+
+output "default_host_management_setting_value" {
+  description = "Value written to the Default Host Management Configuration service setting, as the role path and name Systems Manager expects. Empty when Default Host Management Configuration is disabled."
+  value       = local.dhmc_enabled ? local.dhmc_setting_value : ""
+}
+
+output "inventory_association_id" {
+  description = "ID of the State Manager association running AWS-GatherSoftwareInventory. Empty when Inventory collection is disabled."
+  value       = try(aws_ssm_association.inventory[0].association_id, "")
+}
+
+output "inventory_association_name" {
+  description = "Name of the State Manager association running AWS-GatherSoftwareInventory. Empty when Inventory collection is disabled."
+  value       = try(aws_ssm_association.inventory[0].association_name, "")
+}
+
+output "resource_data_sync_name" {
+  description = "Name of the Inventory resource data sync. Empty when resource data sync is disabled."
+  value       = try(aws_ssm_resource_data_sync.inventory[0].name, "")
+}
+
+output "resource_data_sync_bucket" {
+  description = "Name of the S3 bucket receiving synchronised Inventory data. Empty when resource data sync is disabled."
+  value       = local.resource_data_sync_enabled ? local.resource_data_sync_bucket : ""
+}
+
+output "resource_data_sync_prefix" {
+  description = "Key prefix under which resource data sync writes Inventory data. Empty when resource data sync is disabled or writes to the bucket root."
+  value       = local.resource_data_sync_enabled ? local.resource_data_sync_prefix : ""
 }
 
 output "delegated_administrator_account_id" {

@@ -47,3 +47,43 @@ settings:
     enabled: false                                # (Optional) Enable CloudWatch logging of sessions. Default: false
     # retention: 7                                # (Optional) Log retention in days. Default: 7
     # streaming: false                            # (Optional) Stream session output continuously instead of writing on session end. Default: false
+
+  # fleet_manager:                                # (Optional) Fleet Manager settings. All of these are account and Region wide, and are ignored in delegation mode.
+  #   enabled: false                              # (Optional) Master toggle for this whole block. Nothing below is created unless this is true. Default: false
+  #
+  #   default_host_management:                    # (Optional) Default Host Management Configuration — lets Systems Manager manage every EC2 instance in this account and Region as a managed node, with no instance profile.
+  #     enabled: false                            # (Optional) Turn on Default Host Management Configuration. Instances need IMDSv2 and SSM Agent 3.2.582.0 or later. An instance profile that already allows ssm:UpdateInstanceInformation takes precedence and keeps that instance off DHMC. Default: false
+  #     create_role: true                         # (Optional) Create the IAM role. Set to false to point the setting at a role managed elsewhere. Default: true
+  #     role_name: ""                             # (Optional) Name of the IAM role Systems Manager assumes. Default: "AWSSystemsManagerDefaultEC2InstanceManagementRole"
+  #     role_path: "/service-role/"               # (Optional) IAM path of that role, leading and trailing slash included. Default: "/service-role/"
+  #     additional_policy_arns: []                # (Optional) Extra managed policy ARNs attached to the created role, e.g. "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy". These apply to every managed instance in the Region. Default: []
+  #     session_logging_access: true              # (Optional) Attach an inline policy letting managed nodes write session logs to this module's audit bucket, KMS key and log group. Ignored when create_role is false. Default: true
+  #
+  #   inventory:                                  # (Optional) Inventory collection — populates the Fleet Manager node detail views (applications, network config, Windows updates). Systems Manager permits only one inventory association per node.
+  #     enabled: false                            # (Optional) Create the AWS-GatherSoftwareInventory association. Default: false
+  #     schedule: "rate(1 day)"                   # (Optional) Rate or cron expression for the collection schedule, minimum 30 minutes. Default: "rate(1 day)"
+  #     association_name: ""                      # (Optional) Name of the State Manager association, 3-128 characters of [A-Za-z0-9_.-]. Default: "ssm-inventory-<system-name>"
+  #     apply_only_at_cron_interval: false        # (Optional) Skip the immediate run on apply and wait for the first scheduled interval. Default: false
+  #     max_concurrency: ""                       # (Optional) Nodes to run against at once, as a number or a percentage such as "10%". Default: "" (unset, AWS decides)
+  #     max_errors: ""                            # (Optional) Errors tolerated before the association stops, as a number or a percentage. Default: "" (unset, AWS decides)
+  #     targets:                                  # (Optional) Up to 5 target blocks. Default: every managed node, as below.
+  #       - key: "InstanceIds"                    # (Required within targets) Target key, e.g. "InstanceIds", "tag:Environment", "resource-groups:Name".
+  #         values: ["*"]                         # (Required within targets) Values for that key.
+  #     applications: "Enabled"                   # (Optional) Collect installed application metadata. Values: Enabled, Disabled. Default: "Enabled"
+  #     aws_components: "Enabled"                 # (Optional) Collect AWS component metadata such as amazon-ssm-agent. Values: Enabled, Disabled. Default: "Enabled"
+  #     custom_inventory: "Enabled"               # (Optional) Collect custom inventory metadata. Values: Enabled, Disabled. Default: "Enabled"
+  #     instance_detailed_information: "Enabled"  # (Optional) Collect CPU model, speed and core count. Values: Enabled, Disabled. Default: "Enabled"
+  #     network_config: "Enabled"                 # (Optional) Collect network configuration metadata. Values: Enabled, Disabled. Default: "Enabled"
+  #     services: "Enabled"                       # (Optional) Collect Windows service configuration. Windows only. Values: Enabled, Disabled. Default: "Enabled"
+  #     windows_roles: "Enabled"                  # (Optional) Collect Windows roles. Windows only. Values: Enabled, Disabled. Default: "Enabled"
+  #     windows_updates: "Enabled"                # (Optional) Collect installed Windows updates. Windows only. Values: Enabled, Disabled. Default: "Enabled"
+  #     files: ""                                 # (Optional) JSON string selecting files to inventory, e.g. '[{"Path":"/usr/bin","Pattern":["*ssm*"],"Recursive":false}]'. Only sent when non-empty. Default: ""
+  #     windows_registry: ""                      # (Optional) JSON string selecting Windows registry keys to inventory, e.g. '[{"Path":"HKEY_LOCAL_MACHINE\\SOFTWARE\\Amazon\\MachineImage","ValueNames":["AMIName"]}]'. Only sent when non-empty. Default: ""
+  #
+  #   resource_data_sync:                         # (Optional) Aggregates the collected Inventory into an S3 bucket so it can be queried with Athena. Managed from Fleet Manager, Account management, Resource data sync.
+  #     enabled: false                            # (Optional) Create the resource data sync. Default: false
+  #     name: ""                                  # (Optional) Name of the sync. Default: "ssm-inventory-<system-name>"
+  #     bucket_name: ""                           # (Optional) Destination bucket. Leave empty to use this module's own audit bucket, in which case the required bucket policy statements and KMS grants are added automatically. When set, that bucket's policy is the caller's responsibility. Default: ""
+  #     prefix: "inventory"                       # (Optional) Key prefix for the synchronised data. Set to "" to write at the bucket root. Default: "inventory"
+  #     region: ""                                # (Optional) Region of the destination bucket. Default: "" (the region this module is applied in)
+  #     kms_key_arn: ""                           # (Optional) KMS key ARN used to encrypt the synchronised data. Default: "" (this module's key when the audit bucket is the destination, otherwise the sync sets no key of its own)
