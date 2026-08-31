@@ -6,7 +6,7 @@
 settings:
   # random_bucket_suffix: true                    # (Optional) Deprecated, use bucket.random_suffix instead. Default: true
   # allowed_iam_role_arns: []                     # (Optional) IAM role ARNs allowed to write to the audit bucket and use the KMS key. Default: []
-  # allowed_iam_role_names: []                    # (Optional) IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Default: []
+  # allowed_iam_role_names: []                    # (Optional) IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Supports "*" and "?" wildcards, e.g. "ssm-*" or "*-instance-role". Resolved by listing roles at plan time, so a role created later that matches an existing pattern is picked up on the next plan. Each entry must contain at least one literal character. Default: []
 
   # organization:                                 # (Optional) Delegation mode. When delegated is true ONLY the delegated administrator registrations are created — no bucket, key, log group or session document.
   #   delegated: false                            # (Optional) Run in delegation mode. Must be applied against the Organizations management account. Default: false

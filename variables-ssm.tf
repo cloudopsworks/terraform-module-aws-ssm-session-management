@@ -10,7 +10,7 @@
 # settings:
 #   random_bucket_suffix: true                      # (Optional) Deprecated, use bucket.random_suffix instead. Default: true
 #   allowed_iam_role_arns: []                       # (Optional) List of IAM role ARNs allowed to access the S3 bucket and KMS key. Default: []
-#   allowed_iam_role_names: []                      # (Optional) List of IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Default: []
+#   allowed_iam_role_names: []                      # (Optional) List of IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Entries may use "*" and "?" wildcards (e.g. "ssm-*"), which are resolved by listing roles at plan time. Default: []
 #   organization:                                   # (Optional) Organization delegation settings. When delegated is true ONLY the delegated administrator registrations are created.
 #     delegated: false                              # (Optional) Whether to run in delegation mode, registering SSM delegated administrators instead of session logging resources. Default: false
 #     account_id: ""                                # (Required when delegated is true) Account ID to register as SSM delegated administrator.
@@ -73,5 +73,12 @@ variable "settings" {
   validation {
     condition     = try(var.settings.bucket.name, "") == "" || try(length(var.settings.bucket.name) >= 3 && length(var.settings.bucket.name) <= 63, false)
     error_message = "settings.bucket.name must be between 3 and 63 characters when set."
+  }
+
+  validation {
+    condition = alltrue([
+      for name in try(var.settings.allowed_iam_role_names, []) : can(regex("[^*?]", name))
+    ])
+    error_message = "Each settings.allowed_iam_role_names entry must contain at least one literal character. A pattern of only wildcards would match every IAM role in the account."
   }
 }

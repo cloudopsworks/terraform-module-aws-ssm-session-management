@@ -63,7 +63,7 @@ output "session_document_arn" {
 }
 
 output "allowed_iam_role_arns" {
-  description = "Resolved list of IAM role ARNs granted access to the audit bucket and KMS key, merging settings.allowed_iam_role_arns with roles looked up from settings.allowed_iam_role_names."
+  description = "Resolved list of IAM role ARNs granted access to the audit bucket and KMS key, merging settings.allowed_iam_role_arns with the exact names and wildcard patterns resolved from settings.allowed_iam_role_names."
   value       = local.allowed_iam_role_arns
 }
 

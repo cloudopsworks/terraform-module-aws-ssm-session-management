@@ -93,7 +93,7 @@ Every key is optional; the defaults shown are what the module applies when a key
 settings:
   # random_bucket_suffix: true                    # (Optional) Deprecated, use bucket.random_suffix instead. Default: true
   # allowed_iam_role_arns: []                     # (Optional) IAM role ARNs allowed to write to the audit bucket and use the KMS key. Default: []
-  # allowed_iam_role_names: []                    # (Optional) IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Default: []
+  # allowed_iam_role_names: []                    # (Optional) IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Supports "*" and "?" wildcards, e.g. "ssm-*" or "*-instance-role". Resolved by listing roles at plan time, so a role created later that matches an existing pattern is picked up on the next plan. Each entry must contain at least one literal character. Default: []
 
   # organization:                                 # (Optional) Delegation mode. When delegated is true ONLY the delegated administrator registrations are created — no bucket, key, log group or session document.
   #   delegated: false                            # (Optional) Run in delegation mode. Must be applied against the Organizations management account. Default: false
@@ -234,6 +234,31 @@ settings:
     - "arn:aws:iam::123456789012:role/cross-account-session-role"
 ```
 
+Names may also use `*` and `?` wildcards. Because neither character is legal in an IAM role name, an
+entry containing either is treated as a pattern; everything else is matched exactly.
+
+```yaml
+settings:
+  allowed_iam_role_names:
+    - "ssm-*"                 # every role whose name starts with "ssm-"
+    - "*-instance-role"       # every role whose name ends with "-instance-role"
+    - "ec2-?-worker"          # "?" matches exactly one character
+    - "bastion-instance-role" # no wildcard, matched exactly
+```
+
+Patterns are anchored, so `ssm-*` matches `ssm-session-role` but not `my-ssm-session-role`.
+
+Two behaviours to be aware of when using wildcards:
+
+- **Membership is re-evaluated on every plan.** Terraform lists the account's roles and filters them,
+  so a role created later that matches an existing pattern is added to the bucket and KMS key policies
+  on the next apply, with no change to this configuration. Exact names do not behave this way.
+- **A pattern that matches nothing is silent.** A misspelled exact name fails the plan; a misspelled
+  pattern simply grants no access. Check the `allowed_iam_role_arns` output to see what actually resolved.
+
+Wildcards require `iam:ListRoles` in addition to the `iam:GetRole` needed for exact names. A pattern
+made up only of wildcards is rejected, since it would match every role in the account.
+
 ### Reusing an existing KMS key
 
 ```yaml
@@ -318,6 +343,7 @@ Available targets:
 | [random_string.random](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_iam_role.allowed](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_role) | data source |
+| [aws_iam_roles.allowed_wildcard](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_roles) | data source |
 | [aws_kms_alias.existing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_alias) | data source |
 | [aws_kms_key.existing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_key) | data source |
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
@@ -337,7 +363,7 @@ Available targets:
 
 | Name | Description |
 |------|-------------|
-| <a name="output_allowed_iam_role_arns"></a> [allowed\_iam\_role\_arns](#output\_allowed\_iam\_role\_arns) | Resolved list of IAM role ARNs granted access to the audit bucket and KMS key, merging settings.allowed\_iam\_role\_arns with roles looked up from settings.allowed\_iam\_role\_names. |
+| <a name="output_allowed_iam_role_arns"></a> [allowed\_iam\_role\_arns](#output\_allowed\_iam\_role\_arns) | Resolved list of IAM role ARNs granted access to the audit bucket and KMS key, merging settings.allowed\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.allowed\_iam\_role\_names. |
 | <a name="output_audit_bucket_arn"></a> [audit\_bucket\_arn](#output\_audit\_bucket\_arn) | ARN of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
 | <a name="output_audit_bucket_id"></a> [audit\_bucket\_id](#output\_audit\_bucket\_id) | Name of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
 | <a name="output_audit_bucket_key_prefix"></a> [audit\_bucket\_key\_prefix](#output\_audit\_bucket\_key\_prefix) | Key prefix under which Session Manager writes audit logs in the bucket. |
