@@ -280,12 +280,22 @@ resource "aws_ssm_resource_data_sync" "inventory" {
 # SSM-SessionManagerRunShell document. Recording is the one thing that is separately
 # configurable, and it is exposed only through Cloud Control, hence the awscc provider.
 #
-# The console reaches these settings under Settings, Just-in-time node access, RDP
-# recording. Recordings are written by the ssm-guiconnect service principal, which is why
-# the audit bucket policy and the KMS key policy both need statements of their own.
+# PREREQUISITE: recording is a just-in-time node access feature, not a standalone Fleet
+# Manager one. Just-in-time node access must already be enabled in the account, which is a
+# console-only action performed from the Organizations delegated administrator account and
+# depends on the unified Systems Manager console. No API, CloudFormation resource or
+# Terraform provider can turn it on, so this module cannot satisfy the prerequisite and
+# instead refuses to try unless the caller confirms it is already in place. Without that,
+# Cloud Control fails asynchronously with a 403 "Just-in-time node access is not enabled".
+#
+# Recordings are written by the ssm-guiconnect service principal, which is why the audit
+# bucket policy and the KMS key policy both need statements of their own.
 ##
 locals {
-  rdp_recording_enabled = local.fleet_manager_enabled && try(var.settings.fleet_manager.remote_desktop.recording.enabled, false)
+  # Gated on the caller confirming the prerequisite above, so a misconfiguration surfaces as
+  # a plan-time error naming the actual cause rather than an opaque Cloud Control 403 after
+  # the rest of the stack has already applied.
+  rdp_recording_enabled = local.fleet_manager_enabled && try(var.settings.fleet_manager.remote_desktop.recording.enabled, false) && try(var.settings.fleet_manager.remote_desktop.recording.just_in_time_node_access_enabled, false)
 
   # Same plan-time reasoning as the resource data sync: the bucket and key policies switch
   # on this, so it is derived from configuration and never from the resolved bucket name.

@@ -141,7 +141,13 @@ resource "aws_kms_key" "this" {
       }] : []
     )
   })
-  tags = local.all_tags
+  # RDP recording is a just-in-time node access feature, and the operator policy AWS
+  # documents allows kms:CreateGrant only on keys carrying this tag. Without it an operator
+  # cannot start a recorded connection even once recording preferences are set.
+  tags = merge(
+    local.all_tags,
+    local.rdp_recording_uses_module_key ? { SystemsManagerJustInTimeNodeAccessManaged = "true" } : {}
+  )
 }
 
 resource "aws_kms_alias" "this" {

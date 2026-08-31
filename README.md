@@ -69,7 +69,8 @@ All of it is opt-in and account and Region wide:
 
 - **Remote Desktop connection recording** records RDP connections to S3. This is the only separately
   configurable Remote Desktop setting — a connection otherwise applies the same Session Manager
-  preferences written to the `SSM-SessionManagerRunShell` document.
+  preferences written to the `SSM-SessionManagerRunShell` document. It requires just-in-time node
+  access, which this module cannot enable; see the caveat below.
 
 Recording preferences are exposed only through Cloud Control, so the module also requires the `awscc`
 provider. Nothing from that provider is created unless recording is turned on.
@@ -190,7 +191,8 @@ settings:
   #
   #   remote_desktop:                           # (Optional) Fleet Manager Remote Desktop. Connections otherwise inherit the Session Manager preferences configured above — recording is the only separately configurable setting.
   #     recording:                              # (Optional) RDP connection recording, uploaded to S3 by the ssm-guiconnect service principal.
-  #       enabled: false                        # (Optional) Record RDP connections. Requires a symmetric customer managed KMS key. Default: false
+  #       enabled: false                        # (Optional) Record RDP connections. Requires a symmetric customer managed KMS key AND just-in-time node access already enabled. Default: false
+  #       just_in_time_node_access_enabled: false # (Required when enabled is true) Confirms just-in-time node access is already enabled here. Recording is a JIT feature; JIT is enabled console-only from the Organizations delegated administrator account, needs the unified Systems Manager console, is billed after a 30 day trial, and cannot be turned on by Terraform. Default: false
   #       bucket_name: ""                       # (Optional) Destination bucket. Leave empty to use this module's audit bucket, in which case the required bucket policy statement and KMS grant are added automatically. Default: ""
   #       bucket_owner: ""                      # (Optional) Account ID owning the destination bucket. Default: "" (the current account)
   #       kms_key_arn: ""                       # (Optional) Symmetric encrypt/decrypt customer managed key used to encrypt the recording while Systems Manager processes it. Default: "" (this module's key)
@@ -394,9 +396,14 @@ settings:
 
 Two things to know before turning Inventory on:
 
-- **One association per node.** Systems Manager rejects a second inventory association covering a node
-  that already has one, so an account that was set up from the console needs that association removed
-  or imported first.
+- **One apply-all association per account.** Systems Manager allows only one inventory association that
+  targets every node, so in an account that already has one — Quick Setup and the console both create
+  one — the apply fails with `Multiple apply all associations with document
+  'AWS-GatherSoftwareInventory' are not supported`. Find it with
+  `aws ssm list-associations --association-filter-list key=AssociationName,value=InventoryAssociation`
+  (or list all and look for the document name), then either import it, delete it, or leave
+  `inventory.enabled` at `false` and keep using the existing one. Targeting by tag instead of the
+  default apply-all also avoids the collision.
 - **The audit lifecycle rule is scoped to `settings.audit.s3_key_prefix`.** Session logs still transition
   and expire on schedule; Inventory data sharing the bucket stays in STANDARD so it remains queryable.
 
@@ -419,9 +426,19 @@ settings:
 
 ### Recording Remote Desktop connections
 
+> **Prerequisite: just-in-time node access must already be enabled.** RDP recording is a just-in-time
+> node access feature, not a standalone Fleet Manager one. Just-in-time node access is enabled from the
+> Systems Manager console in the Organizations delegated administrator account (**Just-in-time node
+> access → Enable the new experience**), depends on the unified Systems Manager console, and is billed
+> after a 30 day trial. No API, CloudFormation resource or Terraform provider can turn it on, so this
+> module cannot do it for you. Enabling recording without it fails asynchronously with
+> `403 Just-in-time node access is not enabled`, which is why the module makes you confirm the
+> prerequisite explicitly with `just_in_time_node_access_enabled`.
+
 Records Fleet Manager RDP connections to S3. Leaving `bucket_name` empty sends them to the audit bucket
 this module already manages, and the `ssm-guiconnect` bucket policy statement and KMS grant are added
-for you.
+for you. The module also tags the KMS key `SystemsManagerJustInTimeNodeAccessManaged=true`, without
+which operators cannot obtain the `kms:CreateGrant` permission a recorded connection needs.
 
 ```yaml
 settings:
@@ -432,6 +449,7 @@ settings:
     remote_desktop:
       recording:
         enabled: true
+        just_in_time_node_access_enabled: true   # confirms you have already enabled it in the console
 ```
 
 Recording requires a symmetric, encrypt/decrypt customer managed key; the key this module creates
@@ -460,9 +478,9 @@ Three things to know:
 - **Operators need their own permissions.** Configuring recording requires
   `ssm-guiconnect:UpdateConnectionRecordingPreferences` and `kms:CreateGrant`; connecting requires
   `ssm-guiconnect:StartConnection` and `kms:CreateGrant` on the recording key. This module grants
-  neither — they belong to the human or role making the connection. If you use just-in-time node
-  access, AWS additionally requires the KMS key to carry the tag
-  `SystemsManagerJustInTimeNodeAccessManaged=true`, which you can add through `extra_tags`.
+  neither — they belong to the human or role making the connection. The module does tag the KMS key it
+  creates with `SystemsManagerJustInTimeNodeAccessManaged=true`, which AWS requires before an operator
+  can be granted `kms:CreateGrant` on it. Supply that tag yourself if you bring your own key.
 
 ### Delegation mode
 
