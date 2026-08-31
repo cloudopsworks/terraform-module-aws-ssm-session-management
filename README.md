@@ -12,7 +12,7 @@
 
 # Terraform AWS SSM Session Management Module
 
-
+ [![Latest Release](https://img.shields.io/github/release/cloudopsworks/terraform-module-aws-ssm-session-management.svg?style=for-the-badge)](https://github.com/cloudopsworks/terraform-module-aws-ssm-session-management/releases/latest) [![Last Updated](https://img.shields.io/github/last-commit/cloudopsworks/terraform-module-aws-ssm-session-management.svg?style=for-the-badge)](https://github.com/cloudopsworks/terraform-module-aws-ssm-session-management/commits)
 
 
 This module sets up AWS SSM Session Manager settings, including S3 bucket for audit logs, CloudWatch Log Group, and KMS encryption for both.
@@ -48,6 +48,15 @@ We have [*lots of terraform modules*][terraform_modules] that are Open Source an
 The AWS SSM Session Management module provides a standardized way to configure Session Manager across an organization.
 It ensures that all sessions are logged to a secure S3 bucket and optionally to CloudWatch Logs, with all data encrypted using a KMS key.
 
+The module creates a regional `SSM-SessionManagerRunShell` Session document holding the Session Manager
+preferences, an encrypted S3 bucket with a tiered lifecycle policy for audit logs, an optional CloudWatch
+log group, and the KMS key protecting both. Roles that need to write audit logs may be granted access by
+ARN or by role name.
+
+It also runs in a second, mutually exclusive mode: when `settings.organization.delegated` is `true` the
+module creates **only** the SSM delegated administrator registrations in the Organizations management
+account, and none of the session logging resources.
+
 ## Usage
 
 
@@ -55,124 +64,208 @@ It ensures that all sessions are logged to a secure S3 bucket and optionally to 
 Instead pin to the release tag (e.g. `?ref=vX.Y.Z`) of one of our [latest releases](https://github.com/cloudopsworks/terraform-module-aws-ssm-session-management/releases).
 
 
-To use this module in a Terragrunt configuration:
+This module is consumed through Terragrunt. Bootstrap a deployment with the built-in scaffold command,
+which sources `.boilerplate/boilerplate.yml` to generate `terragrunt.hcl`, `inputs.yaml` and
+`local-tags.json` in the current directory.
+
+```sh
+# 1. Create and enter the target deployment directory
+mkdir -p <environment>/<region>/<spoke>/ssm-session-management
+cd <environment>/<region>/<spoke>/ssm-session-management
+
+# 2. Scaffold the module (do NOT use --working-dir)
+terragrunt scaffold github.com/cloudopsworks/terraform-module-aws-ssm-session-management
+
+# 3. Edit inputs.yaml with deployment-specific values
+#    (all keys and comments are pre-populated from .boilerplate/inputs.yaml)
+vi inputs.yaml
+
+# 4. Apply
+terragrunt apply
+```
+
+### Generated `inputs.yaml`
+
+Every key is optional; the defaults shown are what the module applies when a key is omitted.
+
+```yaml
+# Module configuration
+settings:
+  # random_bucket_suffix: true                    # (Optional) Deprecated, use bucket.random_suffix instead. Default: true
+  # allowed_iam_role_arns: []                     # (Optional) IAM role ARNs allowed to write to the audit bucket and use the KMS key. Default: []
+  # allowed_iam_role_names: []                    # (Optional) IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Default: []
+
+  # organization:                                 # (Optional) Delegation mode. When delegated is true ONLY the delegated administrator registrations are created — no bucket, key, log group or session document.
+  #   delegated: false                            # (Optional) Run in delegation mode. Must be applied against the Organizations management account. Default: false
+  #   account_id: "123456789012"                  # (Required when delegated is true) Account ID to register as SSM delegated administrator.
+
+  bucket:                                         # (Optional) Audit log S3 bucket settings
+    # name: ""                                    # (Optional) Explicit bucket name, 3-63 characters. When set, no name is generated and no random suffix is added. Default: "" (generates "ssm-session-auditlogs-<system-name>")
+    random_suffix: true                           # (Optional) Append a random 8 character suffix to the generated bucket name. Ignored when name is set. Default: true
+    # versioning: false                           # (Optional) Enable versioning on the audit bucket. Default: false
+
+  kms:                                            # (Optional) KMS configuration for encryption
+    enabled: true                                 # (Optional) Create a new KMS key for session data. Default: true
+    # key_alias: ""                               # (Optional) Existing KMS key alias to use when enabled is false. Default: ""
+    # key_id: ""                                  # (Optional) Existing KMS key ID to use when enabled is false. Default: ""
+    # deletion_window: 30                         # (Optional) Deletion window in days for the created key. Default: 30
+    # enable_key_rotation: true                   # (Optional) Enable automatic key rotation. Default: true
+    # rotation_period_in_days: 90                 # (Optional) Rotation period in days. Default: 90
+    # multi_region: false                         # (Optional) Create the key as multi-region. Default: false
+    # alias_name: "ssm-session-mgmt-key"          # (Optional) Alias name for the created key, without the "alias/" prefix. Default: "ssm-session-mgmt-key-<system-name>"
+
+  session:                                        # (Optional) Session Manager preferences written to the SSM-SessionManagerRunShell document
+    # run_as: ""                                  # (Optional) OS user to run the session as. Default: ""
+    # run_as_enabled: false                       # (Optional) Whether Session Manager honours run_as. Default: true when run_as is non-empty, false otherwise
+    timeout: 20                                   # (Optional) Idle session timeout in minutes, valid values 1-60. Default: 20
+    max_duration: 60                              # (Optional) Maximum session duration in minutes, valid values 1-1440. Default: 60
+    # shell_profile:                              # (Optional) Commands run at session start, per platform
+    #   linux: ""                                 # (Optional) Shell commands to run when a Linux session starts. Default: ""
+    #   windows: ""                               # (Optional) Shell commands to run when a Windows session starts. Default: ""
+
+  audit:                                          # (Optional) Audit log retention settings for S3
+    # s3_key_prefix: "session-manager/"           # (Optional) Key prefix for session logs written to the bucket. Default: "session-manager/"
+    transition_days: 30                           # (Optional) Days before transitioning logs to STANDARD_IA. STANDARD_IA bills a 128 KB minimum per object, which can cost more than STANDARD for small session logs. Default: 30
+    archive_days: 60                              # (Optional) Days before transitioning logs to GLACIER. Default: 60
+    retention_years: 5                            # (Optional) Years to retain logs before expiration. Default: 5
+    # abort_multipart_days: 7                     # (Optional) Days before aborting incomplete multipart uploads. Default: 7
+
+  cloudwatch:                                     # (Optional) CloudWatch logging settings
+    enabled: false                                # (Optional) Enable CloudWatch logging of sessions. Default: false
+    # retention: 7                                # (Optional) Log retention in days. Default: 7
+    # streaming: false                            # (Optional) Stream session output continuously instead of writing on session end. Default: false
+```
+
+### Generated `terragrunt.hcl`
+
+Scaffold renders the file below; `inputs.yaml` is loaded as `local.local_vars` and each module variable is
+wired into the `inputs` block. The `org`, `spoke_def` and `extra_tags` values come from the Terragrunt
+hierarchy, not from `inputs.yaml`.
+
 ```hcl
+locals {
+  local_vars  = yamldecode(file("./inputs.yaml"))
+  spoke_vars  = yamldecode(file(find_in_parent_folders("spoke-inputs.yaml")))
+  region_vars = yamldecode(file(find_in_parent_folders("region-inputs.yaml")))
+  env_vars    = yamldecode(file(find_in_parent_folders("env-inputs.yaml")))
+  global_vars = yamldecode(file(find_in_parent_folders("global-inputs.yaml")))
+
+  local_tags  = jsondecode(file("./local-tags.json"))
+  spoke_tags  = jsondecode(file(find_in_parent_folders("spoke-tags.json")))
+  region_tags = jsondecode(file(find_in_parent_folders("region-tags.json")))
+  env_tags    = jsondecode(file(find_in_parent_folders("env-tags.json")))
+  global_tags = jsondecode(file(find_in_parent_folders("global-tags.json")))
+
+  tags = merge(
+    local.global_tags,
+    local.env_tags,
+    local.region_tags,
+    local.spoke_tags,
+    local.local_tags
+  )
+}
+
+include "root" {
+  path = find_in_parent_folders("root.hcl")
+}
+
 terraform {
-  source = "git::https://github.com/cloudopsworks/terraform-module-aws-ssm-session-management.git?ref=v1.0.0"
+  source = "git::https://github.com/cloudopsworks/terraform-module-aws-ssm-session-management.git?ref=v1.1.0"
 }
 
 inputs = {
-  org = {
-    organization_name = "my-org"
-    organization_unit = "shared"
-    environment_type  = "production"
-    environment_name  = "prod"
-  }
-  spoke_def = "001"
-  is_hub    = false
-  
-  settings = {
-    cloudwatch = {
-      enabled   = true
-      retention = 14
-    }
-    kms = {
-      enabled = true
-    }
-  }
+  is_hub     = false
+  org        = local.env_vars.org
+  spoke_def  = local.spoke_vars.spoke
+  settings   = try(local.local_vars.settings, {})
+  extra_tags = local.tags
 }
-```
-
-### Variables Documentation (YAML format)
-```yaml
-# Organization details
-org:                                              # (Required) Organization details
-  organization_name: "example"                    # (Required) The name of the organization
-  organization_unit: "devops"                     # (Required) The unit within the organization
-  environment_type: "production"                  # (Required) The type of environment (e.g. production, staging)
-  environment_name: "prod"                        # (Required) The name of the environment
-
-# Spoke ID Number
-spoke_def: "001"                                  # (Optional) Spoke ID Number, must be a 3 digit number. Default: "001"
-
-# Hub/Spoke configuration
-is_hub: false                                     # (Optional) Is this a hub or spoke configuration? Default: false
-
-# Extra tags
-extra_tags: {}                                    # (Optional) Extra tags to add to the resources. Default: {}
-
-# Settings for SSM Session Manager & SSM Fleet Manager
-settings:
-  random_bucket_suffix: true                      # (Optional) Whether to add a random suffix to the S3 bucket name. Default: true
-  allowed_iam_role_arns: []                       # (Optional) List of IAM role ARNs allowed to access the S3 bucket and KMS key. Default: []
-  kms:                                            # (Optional) KMS configuration for encryption
-    enabled: true                                 # (Optional) Whether to create a new KMS key. Default: true
-    key_alias: ""                                 # (Optional) Existing KMS key alias to use if kms.enabled is false. Default: ""
-    key_id: ""                                    # (Optional) Existing KMS key ID to use if kms.enabled is false. Default: ""
-    deletion_window: 30                           # (Optional) Deletion window in days for the KMS key. Default: 30
-    enable_key_rotation: true                     # (Optional) Whether to enable key rotation for the KMS key. Default: true
-    rotation_period_in_days: 90                   # (Optional) Rotation period in days for the KMS key. Default: 90
-    multi_region: false                           # (Optional) Whether the KMS key is multi-region. Default: false
-    alias_name: "ssm-session-mgmt-key"            # (Optional) Alias name for the KMS key. Default: "ssm-session-mgmt-key-${local.system_name}"
-  session:                                        # (Optional) Session Manager settings
-    run_as: ""                                    # (Optional) The user to run as during the session. Default: ""
-    timeout: 20                                   # (Optional) Idle session timeout in minutes. Default: 20
-    max_duration: 60                              # (Optional) Maximum session duration in minutes. Default: 60
-  audit:                                          # (Optional) Audit logs settings for S3
-    transition_days: 30                           # (Optional) Number of days before transitioning logs to STANDARD_IA. Default: 30
-    archive_days: 60                              # (Optional) Number of days before transitioning logs to GLACIER. Default: 60
-    retention_years: 5                            # (Optional) Number of years to retain logs. Default: 5
-  cloudwatch:                                     # (Optional) CloudWatch logging settings
-    enabled: false                                # (Optional) Whether to enable CloudWatch logging. Default: false
-    retention: 7                                  # (Optional) CloudWatch log retention in days. Default: 7
 ```
 
 ## Quick Start
 
-1. Define your Terragrunt configuration.
-2. Provide the required `org` input.
-3. Run `terragrunt plan` to see the resources to be created.
-4. Run `terragrunt apply` to deploy the configuration.
+1. Create the deployment directory and run `terragrunt scaffold github.com/cloudopsworks/terraform-module-aws-ssm-session-management` inside it.
+2. Edit `inputs.yaml`; the defaults are usable as-is for a first deployment.
+3. Add the instance roles that will write session logs under `settings.allowed_iam_role_names`.
+4. Run `terragrunt plan` to review the resources to be created.
+5. Run `terragrunt apply` to deploy the configuration.
 
 
 ## Examples
 
-### Basic Usage
-```hcl
-inputs = {
-  org = {
-    organization_name = "cloudopsworks"
-    organization_unit = "it"
-    environment_type  = "prod"
-    environment_name  = "core"
-  }
-}
+### Minimal
+
+Leave `inputs.yaml` at its defaults. The module creates the audit bucket with a random suffix, a customer
+managed KMS key, and the Session document. CloudWatch logging stays off.
+
+```yaml
+settings:
+  kms:
+    enabled: true
 ```
 
-### Advanced Usage with CloudWatch and Custom KMS
-```hcl
-inputs = {
-  org = {
-    organization_name = "cloudopsworks"
-    organization_unit = "it"
-    environment_type  = "prod"
-    environment_name  = "core"
-  }
-  settings = {
-    cloudwatch = {
-      enabled   = true
-      retention = 30
-    }
-    kms = {
-      enabled                 = true
-      deletion_window         = 7
-      rotation_period_in_days = 180
-    }
-    audit = {
-      retention_years = 7
-    }
-  }
-}
+### CloudWatch logging with a longer retention
+
+```yaml
+settings:
+  cloudwatch:
+    enabled: true
+    retention: 30
+    streaming: true
+  kms:
+    enabled: true
+    deletion_window: 7
+    rotation_period_in_days: 180
+  audit:
+    retention_years: 7
+```
+
+### Granting instance roles access to the audit bucket
+
+Roles may be given as ARNs, as plain names resolved in the current account, or both. The two lists are
+merged and de-duplicated.
+
+```yaml
+settings:
+  allowed_iam_role_names:
+    - "ec2-ssm-managed-instance-role"
+    - "bastion-instance-role"
+  allowed_iam_role_arns:
+    - "arn:aws:iam::123456789012:role/cross-account-session-role"
+```
+
+### Reusing an existing KMS key
+
+```yaml
+settings:
+  kms:
+    enabled: false
+    key_alias: "alias/my-existing-session-key"
+```
+
+### Running a start-up command in every session
+
+```yaml
+settings:
+  session:
+    run_as: "ec2-user"
+    run_as_enabled: true
+    timeout: 15
+    max_duration: 120
+    shell_profile:
+      linux: "cd /var/log && echo 'Session started'"
+```
+
+### Delegation mode
+
+Applied against the Organizations management account. Creates only the delegated administrator
+registrations for SSM, SSM Quick Setup, CloudFormation StackSets and Resource Explorer.
+
+```yaml
+settings:
+  organization:
+    delegated: true
+    account_id: "123456789012"
 ```
 
 
@@ -194,21 +287,21 @@ Available targets:
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.3 |
-| <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.4 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.35 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.4 |
-| <a name="provider_random"></a> [random](#provider\_random) | n/a |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.62.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 
 ## Modules
 
 | Name | Source | Version |
 |------|--------|---------|
 | <a name="module_ssm_bucket"></a> [ssm\_bucket](#module\_ssm\_bucket) | terraform-aws-modules/s3-bucket/aws | ~> 5.10 |
-| <a name="module_tags"></a> [tags](#module\_tags) | cloudopsworks/tags/local | 1.0.9 |
+| <a name="module_tags"></a> [tags](#module\_tags) | cloudopsworks/tags/local | 1.0.10 |
 
 ## Resources
 
@@ -224,8 +317,10 @@ Available targets:
 | [aws_ssm_document.session_manager](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
 | [random_string.random](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_iam_role.allowed](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_role) | data source |
 | [aws_kms_alias.existing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_alias) | data source |
 | [aws_kms_key.existing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_key) | data source |
+| [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 
 ## Inputs
@@ -240,7 +335,20 @@ Available targets:
 
 ## Outputs
 
-No outputs.
+| Name | Description |
+|------|-------------|
+| <a name="output_allowed_iam_role_arns"></a> [allowed\_iam\_role\_arns](#output\_allowed\_iam\_role\_arns) | Resolved list of IAM role ARNs granted access to the audit bucket and KMS key, merging settings.allowed\_iam\_role\_arns with roles looked up from settings.allowed\_iam\_role\_names. |
+| <a name="output_audit_bucket_arn"></a> [audit\_bucket\_arn](#output\_audit\_bucket\_arn) | ARN of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
+| <a name="output_audit_bucket_id"></a> [audit\_bucket\_id](#output\_audit\_bucket\_id) | Name of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
+| <a name="output_audit_bucket_key_prefix"></a> [audit\_bucket\_key\_prefix](#output\_audit\_bucket\_key\_prefix) | Key prefix under which Session Manager writes audit logs in the bucket. |
+| <a name="output_cloudwatch_log_group_arn"></a> [cloudwatch\_log\_group\_arn](#output\_cloudwatch\_log\_group\_arn) | ARN of the CloudWatch log group receiving session logs. Empty when CloudWatch logging is disabled. |
+| <a name="output_cloudwatch_log_group_name"></a> [cloudwatch\_log\_group\_name](#output\_cloudwatch\_log\_group\_name) | Name of the CloudWatch log group receiving session logs. Empty when CloudWatch logging is disabled. |
+| <a name="output_delegated_administrator_account_id"></a> [delegated\_administrator\_account\_id](#output\_delegated\_administrator\_account\_id) | Account ID registered as SSM delegated administrator. Empty when delegation mode is disabled. |
+| <a name="output_kms_key_alias"></a> [kms\_key\_alias](#output\_kms\_key\_alias) | Alias of the KMS key created by this module. Empty when the module does not create a key. |
+| <a name="output_kms_key_arn"></a> [kms\_key\_arn](#output\_kms\_key\_arn) | ARN of the KMS key used to encrypt session data. Empty when no customer managed key is in use. |
+| <a name="output_kms_key_id"></a> [kms\_key\_id](#output\_kms\_key\_id) | Key ID of the KMS key used to encrypt session data, whether created by this module or supplied. Empty when no customer managed key is in use. |
+| <a name="output_session_document_arn"></a> [session\_document\_arn](#output\_session\_document\_arn) | ARN of the SSM Session document holding the regional Session Manager preferences. Empty in delegation mode. |
+| <a name="output_session_document_name"></a> [session\_document\_name](#output\_session\_document\_name) | Name of the SSM Session document holding the regional Session Manager preferences. Empty in delegation mode. |
 
 
 

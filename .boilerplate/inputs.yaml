@@ -1,1 +1,49 @@
 # Module configuration
+#
+# Settings for SSM Session Manager & SSM Fleet Manager.
+# Every key is optional; the defaults shown are what the module applies when a key is
+# omitted. Uncomment the keys you need — the indentation is already correct.
+settings:
+  # random_bucket_suffix: true                    # (Optional) Deprecated, use bucket.random_suffix instead. Default: true
+  # allowed_iam_role_arns: []                     # (Optional) IAM role ARNs allowed to write to the audit bucket and use the KMS key. Default: []
+  # allowed_iam_role_names: []                    # (Optional) IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Default: []
+
+  # organization:                                 # (Optional) Delegation mode. When delegated is true ONLY the delegated administrator registrations are created — no bucket, key, log group or session document.
+  #   delegated: false                            # (Optional) Run in delegation mode. Must be applied against the Organizations management account. Default: false
+  #   account_id: "123456789012"                  # (Required when delegated is true) Account ID to register as SSM delegated administrator.
+
+  bucket:                                         # (Optional) Audit log S3 bucket settings
+    # name: ""                                    # (Optional) Explicit bucket name, 3-63 characters. When set, no name is generated and no random suffix is added. Default: "" (generates "ssm-session-auditlogs-<system-name>")
+    random_suffix: true                           # (Optional) Append a random 8 character suffix to the generated bucket name. Ignored when name is set. Default: true
+    # versioning: false                           # (Optional) Enable versioning on the audit bucket. Default: false
+
+  kms:                                            # (Optional) KMS configuration for encryption
+    enabled: true                                 # (Optional) Create a new KMS key for session data. Default: true
+    # key_alias: ""                               # (Optional) Existing KMS key alias to use when enabled is false. Default: ""
+    # key_id: ""                                  # (Optional) Existing KMS key ID to use when enabled is false. Default: ""
+    # deletion_window: 30                         # (Optional) Deletion window in days for the created key. Default: 30
+    # enable_key_rotation: true                   # (Optional) Enable automatic key rotation. Default: true
+    # rotation_period_in_days: 90                 # (Optional) Rotation period in days. Default: 90
+    # multi_region: false                         # (Optional) Create the key as multi-region. Default: false
+    # alias_name: "ssm-session-mgmt-key"          # (Optional) Alias name for the created key, without the "alias/" prefix. Default: "ssm-session-mgmt-key-<system-name>"
+
+  session:                                        # (Optional) Session Manager preferences written to the SSM-SessionManagerRunShell document
+    # run_as: ""                                  # (Optional) OS user to run the session as. Default: ""
+    # run_as_enabled: false                       # (Optional) Whether Session Manager honours run_as. Default: true when run_as is non-empty, false otherwise
+    timeout: 20                                   # (Optional) Idle session timeout in minutes, valid values 1-60. Default: 20
+    max_duration: 60                              # (Optional) Maximum session duration in minutes, valid values 1-1440. Default: 60
+    # shell_profile:                              # (Optional) Commands run at session start, per platform
+    #   linux: ""                                 # (Optional) Shell commands to run when a Linux session starts. Default: ""
+    #   windows: ""                               # (Optional) Shell commands to run when a Windows session starts. Default: ""
+
+  audit:                                          # (Optional) Audit log retention settings for S3
+    # s3_key_prefix: "session-manager/"           # (Optional) Key prefix for session logs written to the bucket. Default: "session-manager/"
+    transition_days: 30                           # (Optional) Days before transitioning logs to STANDARD_IA. STANDARD_IA bills a 128 KB minimum per object, which can cost more than STANDARD for small session logs. Default: 30
+    archive_days: 60                              # (Optional) Days before transitioning logs to GLACIER. Default: 60
+    retention_years: 5                            # (Optional) Years to retain logs before expiration. Default: 5
+    # abort_multipart_days: 7                     # (Optional) Days before aborting incomplete multipart uploads. Default: 7
+
+  cloudwatch:                                     # (Optional) CloudWatch logging settings
+    enabled: false                                # (Optional) Enable CloudWatch logging of sessions. Default: false
+    # retention: 7                                # (Optional) Log retention in days. Default: 7
+    # streaming: false                            # (Optional) Stream session output continuously instead of writing on session end. Default: false

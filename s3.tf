@@ -1,5 +1,5 @@
 ##
-# (c) 2021-2025
+# (c) 2021-2026
 #     Cloud Ops Works LLC - https://cloudops.works/
 #     Find us on:
 #       GitHub: https://github.com/cloudopsworks
@@ -8,24 +8,32 @@
 #
 
 locals {
-  ssm_logs_bucket = try(var.settings.bucket.name, "") != "" ? var.settings.bucket.name : join("",
-    compact(concat([
-      "ssm-session-auditlogs-",
-      local.system_name,
-      ],
-      try(var.settings.bucket.random_suffix, true) ? [
-        "-"
-      ] : []
-      ,
-      random_string.random.*.result
-    ))
-  )
+  bucket_name_override = try(var.settings.bucket.name, "")
 
-  kms_key_arn = try(data.aws_kms_key.existing[0].arn, data.aws_kms_alias.existing[0].target_key_arn, aws_kms_key.this[0].arn, "arn:aws:kms:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:alias/aws/s3")
+  # settings.random_bucket_suffix is the legacy spelling kept for backwards
+  # compatibility; settings.bucket.random_suffix takes precedence when both are set.
+  bucket_random_suffix = try(var.settings.bucket.random_suffix, try(var.settings.random_bucket_suffix, true))
+
+  create_bucket_suffix = local.bucket_random_suffix && local.bucket_name_override == "" && !local.is_delegated
+
+  ssm_logs_bucket_prefix = "ssm-session-auditlogs-${local.system_name}"
+
+  ssm_logs_bucket = local.bucket_name_override != "" ? local.bucket_name_override : join("", concat(
+    [local.ssm_logs_bucket_prefix],
+    local.create_bucket_suffix ? ["-"] : [],
+    random_string.random[*].result
+  ))
+
+  # Deterministic length of the generated name; the random suffix always contributes
+  # exactly 9 characters ("-" plus 8 random). Used to guard the 63 character S3 limit
+  # without waiting for the random value to be known.
+  ssm_logs_bucket_length = local.bucket_name_override != "" ? length(local.bucket_name_override) : length(local.ssm_logs_bucket_prefix) + (local.create_bucket_suffix ? 9 : 0)
+
+  s3_kms_key_arn = local.has_kms_key ? local.kms_key_arn : "arn:${data.aws_partition.current.partition}:kms:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:alias/aws/s3"
 }
 
 resource "random_string" "random" {
-  count   = try(var.settings.random_bucket_suffix, true) && !try(var.settings.organization.delegated, false) && try(var.settings.bucket.name, "") == "" ? 1 : 0
+  count   = local.create_bucket_suffix ? 1 : 0
   length  = 8
   special = false
   lower   = true
@@ -36,7 +44,7 @@ resource "random_string" "random" {
 module "ssm_bucket" {
   source                                = "terraform-aws-modules/s3-bucket/aws"
   version                               = "~> 5.10"
-  create_bucket                         = !try(var.settings.organization.delegated, false)
+  create_bucket                         = !local.is_delegated
   bucket                                = local.ssm_logs_bucket
   acl                                   = "private"
   block_public_acls                     = true
@@ -46,23 +54,23 @@ module "ssm_bucket" {
   attach_public_policy                  = true
   attach_require_latest_tls_policy      = true
   attach_deny_insecure_transport_policy = true
-  attach_policy                         = length(try(var.settings.allowed_iam_role_arns, [])) > 0
-  policy = length(try(var.settings.allowed_iam_role_arns, [])) > 0 ? jsonencode({
-    version = "2012-10-17"
-    statement = [
+  attach_policy                         = local.has_allowed_iam_roles
+  policy = local.has_allowed_iam_roles ? jsonencode({
+    Version = "2012-10-17"
+    Statement = [
       {
         Sid    = "AllowIAMRolesAccess"
         Effect = "Allow"
         Principal = {
-          AWS = var.settings.allowed_iam_role_arns
+          AWS = local.allowed_iam_role_arns
         }
         Action = [
           "s3:PutObject",
           "s3:GetEncryptionConfiguration",
         ]
         Resource = [
-          "arn:aws:s3:::${local.ssm_logs_bucket}/*",
-          "arn:aws:s3:::${local.ssm_logs_bucket}"
+          "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}/*",
+          "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
         ]
       }
     ]
@@ -71,13 +79,13 @@ module "ssm_bucket" {
   object_ownership         = "BucketOwnerPreferred"
 
   versioning = {
-    enabled = false
+    enabled = try(var.settings.bucket.versioning, false)
   }
 
   server_side_encryption_configuration = {
     rule = {
       apply_server_side_encryption_by_default = {
-        kms_master_key_id = local.kms_key_arn
+        kms_master_key_id = local.s3_kms_key_arn
         sse_algorithm     = "aws:kms"
       }
     }
@@ -87,6 +95,8 @@ module "ssm_bucket" {
     {
       id      = "audit-log-lifecycle-policy"
       enabled = true
+
+      abort_incomplete_multipart_upload_days = try(var.settings.audit.abort_multipart_days, 7)
 
       transition = [
         {
