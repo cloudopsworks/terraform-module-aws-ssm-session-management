@@ -8,6 +8,8 @@
 #
 
 locals {
+  audit_s3_key_prefix = try(var.settings.audit.s3_key_prefix, "session-manager/")
+
   bucket_name_override = try(var.settings.bucket.name, "")
 
   # settings.random_bucket_suffix is the legacy spelling kept for backwards
@@ -30,6 +32,80 @@ locals {
   ssm_logs_bucket_length = local.bucket_name_override != "" ? length(local.bucket_name_override) : length(local.ssm_logs_bucket_prefix) + (local.create_bucket_suffix ? 9 : 0)
 
   s3_kms_key_arn = local.has_kms_key ? local.kms_key_arn : "arn:${data.aws_partition.current.partition}:kms:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:alias/aws/s3"
+
+  # Two independent reasons to attach a bucket policy, so the statements are assembled as a
+  # list and the policy is only attached when at least one of them applies.
+  bucket_policy_statements = concat(
+    local.has_allowed_iam_roles ? [{
+      Sid    = "AllowIAMRolesAccess"
+      Effect = "Allow"
+      Principal = {
+        AWS = local.allowed_iam_role_arns
+      }
+      Action = [
+        "s3:PutObject",
+        "s3:GetEncryptionConfiguration",
+      ]
+      Resource = [
+        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}/*",
+        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
+      ]
+    }] : [],
+    # Resource data sync delivers Inventory data as the service principal, not as a role in
+    # this account, so it needs its own grant even though the bucket is account-owned. The
+    # two statements are gated separately because they carry different shapes, and a single
+    # conditional returning a two element tuple has no consistent type with the empty one.
+    local.resource_data_sync_uses_audit_bucket ? [{
+      Sid    = "SSMBucketPermissionsCheck"
+      Effect = "Allow"
+      Principal = {
+        Service = "ssm.amazonaws.com"
+      }
+      Action   = "s3:GetBucketAcl"
+      Resource = "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
+    }] : [],
+    local.resource_data_sync_uses_audit_bucket ? [{
+      Sid    = "SSMBucketDelivery"
+      Effect = "Allow"
+      Principal = {
+        Service = "ssm.amazonaws.com"
+      }
+      Action   = "s3:PutObject"
+      Resource = local.resource_data_sync_object_pattern
+      Condition = {
+        StringEquals = {
+          "s3:x-amz-acl"      = "bucket-owner-full-control"
+          "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+        }
+        ArnLike = {
+          "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:ssm:*:${data.aws_caller_identity.current.account_id}:resource-data-sync/*"
+        }
+      }
+    }] : [],
+    # Fleet Manager Remote Desktop recordings are uploaded by the GUI Connect service
+    # principal. The preferences schema carries no key prefix, so the grant has to cover the
+    # bucket as a whole — which is also why the session log lifecycle rule above is scoped
+    # to its own prefix rather than left bucket-wide.
+    local.rdp_recording_uses_audit_bucket ? [{
+      Sid    = "ConnectionRecording"
+      Effect = "Allow"
+      Principal = {
+        Service = "ssm-guiconnect.amazonaws.com"
+      }
+      Action = "s3:PutObject"
+      Resource = [
+        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}",
+        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}/*"
+      ]
+      Condition = {
+        StringEquals = {
+          "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+        }
+      }
+    }] : []
+  )
+
+  attach_bucket_policy = length(local.bucket_policy_statements) > 0
 }
 
 resource "random_string" "random" {
@@ -54,26 +130,10 @@ module "ssm_bucket" {
   attach_public_policy                  = true
   attach_require_latest_tls_policy      = true
   attach_deny_insecure_transport_policy = true
-  attach_policy                         = local.has_allowed_iam_roles
-  policy = local.has_allowed_iam_roles ? jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "AllowIAMRolesAccess"
-        Effect = "Allow"
-        Principal = {
-          AWS = local.allowed_iam_role_arns
-        }
-        Action = [
-          "s3:PutObject",
-          "s3:GetEncryptionConfiguration",
-        ]
-        Resource = [
-          "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}/*",
-          "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
-        ]
-      }
-    ]
+  attach_policy                         = local.attach_bucket_policy
+  policy = local.attach_bucket_policy ? jsonencode({
+    Version   = "2012-10-17"
+    Statement = local.bucket_policy_statements
   }) : null
   control_object_ownership = true
   object_ownership         = "BucketOwnerPreferred"
@@ -95,6 +155,13 @@ module "ssm_bucket" {
     {
       id      = "audit-log-lifecycle-policy"
       enabled = true
+
+      # Scoped to the session log prefix so that other data sharing this bucket — Fleet
+      # Manager Inventory delivered by resource data sync, which has to stay in a queryable
+      # storage class — is not archived or expired by the session log retention policy.
+      filter = {
+        prefix = local.audit_s3_key_prefix
+      }
 
       abort_incomplete_multipart_upload_days = try(var.settings.audit.abort_multipart_days, 7)
 

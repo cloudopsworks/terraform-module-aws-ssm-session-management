@@ -82,6 +82,48 @@ resource "aws_kms_key" "this" {
           }
         }
       }] : [],
+      # Resource data sync writes Inventory data as the service principal rather than as a
+      # role in this account, so the key policy has to grant it directly.
+      local.resource_data_sync_uses_module_key ? [{
+        Sid    = "AllowSSMResourceDataSyncAccess"
+        Effect = "Allow"
+        Principal = {
+          Service = "ssm.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:Describe*"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      }] : [],
+      # GUI Connect writes the finished RDP recording into the audit bucket, so it needs to
+      # encrypt with the bucket's key. Scoped through kms:ViaService so the grant only
+      # applies to calls S3 makes on its behalf, never to direct use of the key.
+      local.rdp_recording_needs_bucket_key_grant ? [{
+        Sid    = "AllowGuiConnectRecordingAccessViaS3"
+        Effect = "Allow"
+        Principal = {
+          Service = "ssm-guiconnect.amazonaws.com"
+        }
+        Action   = "kms:GenerateDataKey*"
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+          StringLike = {
+            "kms:ViaService" = "s3.${data.aws_region.current.region}.amazonaws.com"
+          }
+        }
+      }] : [],
       local.has_allowed_iam_roles ? [{
         Sid    = "AllowIAMRolesAccess"
         Effect = "Allow"
@@ -99,7 +141,13 @@ resource "aws_kms_key" "this" {
       }] : []
     )
   })
-  tags = local.all_tags
+  # RDP recording is a just-in-time node access feature, and the operator policy AWS
+  # documents allows kms:CreateGrant only on keys carrying this tag. Without it an operator
+  # cannot start a recorded connection even once recording preferences are set.
+  tags = merge(
+    local.all_tags,
+    local.rdp_recording_uses_module_key ? { SystemsManagerJustInTimeNodeAccessManaged = "true" } : {}
+  )
 }
 
 resource "aws_kms_alias" "this" {

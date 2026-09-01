@@ -29,7 +29,7 @@ resource "aws_ssm_document" "session_manager" {
     sessionType   = "Standard_Stream"
     inputs = {
       s3BucketName                = module.ssm_bucket.s3_bucket_id
-      s3KeyPrefix                 = try(var.settings.audit.s3_key_prefix, "session-manager/")
+      s3KeyPrefix                 = local.audit_s3_key_prefix
       s3EncryptionEnabled         = true
       cloudWatchLogGroupName      = local.cloudwatch_enabled ? aws_cloudwatch_log_group.this[0].name : ""
       cloudWatchEncryptionEnabled = local.cloudwatch_encryption_enabled
