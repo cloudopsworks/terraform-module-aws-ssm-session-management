@@ -511,7 +511,7 @@ Available targets:
 ## Requirements
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.3 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.35 |
 | <a name="requirement_awscc"></a> [awscc](#requirement\_awscc) | >= 1.40 |
@@ -519,22 +519,22 @@ Available targets:
 ## Providers
 
 | Name | Version |
-| ---- | ------- |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.62.0 |
-| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | 1.99.0 |
-| <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
+|------|---------|
+| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.35 |
+| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | >= 1.40 |
+| <a name="provider_random"></a> [random](#provider\_random) | n/a |
 
 ## Modules
 
 | Name | Source | Version |
-| ---- | ------ | ------- |
+|------|--------|---------|
 | <a name="module_ssm_bucket"></a> [ssm\_bucket](#module\_ssm\_bucket) | terraform-aws-modules/s3-bucket/aws | ~> 5.10 |
 | <a name="module_tags"></a> [tags](#module\_tags) | cloudopsworks/tags/local | 1.0.10 |
 
 ## Resources
 
 | Name | Type |
-| ---- | ---- |
+|------|------|
 | [aws_cloudwatch_log_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_iam_role.default_host_management](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy.default_host_management_session_logging](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
@@ -563,7 +563,7 @@ Available targets:
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-| ---- | ----------- | ---- | ------- | :------: |
+|------|-------------|------|---------|:--------:|
 | <a name="input_extra_tags"></a> [extra\_tags](#input\_extra\_tags) | Extra tags to add to the resources | `map(string)` | `{}` | no |
 | <a name="input_is_hub"></a> [is\_hub](#input\_is\_hub) | Is this a hub or spoke configuration? | `bool` | `false` | no |
 | <a name="input_org"></a> [org](#input\_org) | Organization details | <pre>object({<br/>    organization_name = string<br/>    organization_unit = string<br/>    environment_type  = string<br/>    environment_name  = string<br/>  })</pre> | n/a | yes |
@@ -573,7 +573,7 @@ Available targets:
 ## Outputs
 
 | Name | Description |
-| ---- | ----------- |
+|------|-------------|
 | <a name="output_allowed_iam_role_arns"></a> [allowed\_iam\_role\_arns](#output\_allowed\_iam\_role\_arns) | Resolved list of IAM role ARNs granted access to the audit bucket and KMS key, merging settings.allowed\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.allowed\_iam\_role\_names. |
 | <a name="output_audit_bucket_arn"></a> [audit\_bucket\_arn](#output\_audit\_bucket\_arn) | ARN of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
 | <a name="output_audit_bucket_id"></a> [audit\_bucket\_id](#output\_audit\_bucket\_id) | Name of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
