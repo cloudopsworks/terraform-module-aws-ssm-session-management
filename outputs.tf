@@ -67,6 +67,11 @@ output "allowed_iam_role_arns" {
   value       = local.allowed_iam_role_arns
 }
 
+output "admin_iam_role_arns" {
+  description = "Resolved list of IAM role ARNs granted s3:* on the audit bucket, from the exact names and wildcard patterns in settings.admin_iam_role_names."
+  value       = local.admin_iam_role_arns
+}
+
 output "default_host_management_role_name" {
   description = "Name of the IAM role Systems Manager assumes for Default Host Management Configuration. Empty when the module does not create the role."
   value       = try(aws_iam_role.default_host_management[0].name, "")

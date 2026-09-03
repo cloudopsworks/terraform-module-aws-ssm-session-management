@@ -152,6 +152,7 @@ settings:
   # random_bucket_suffix: true                    # (Optional) Deprecated, use bucket.random_suffix instead. Default: true
   # allowed_iam_role_arns: []                     # (Optional) IAM role ARNs allowed to write to the audit bucket and use the KMS key. Default: []
   # allowed_iam_role_names: []                    # (Optional) IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Supports "*" and "?" wildcards, e.g. "ssm-*" or "*-instance-role". Resolved by listing roles at plan time, so a role created later that matches an existing pattern is picked up on the next plan. Each entry must contain at least one literal character. Default: []
+  # admin_iam_role_names: []                      # (Optional) IAM role names in the current account granted s3:* on the audit bucket, plus the KMS Encrypt/Decrypt/GenerateDataKey actions that access depends on (the bucket is SSE-KMS, so s3:* alone cannot read an object body). Same "*"/"?" wildcard support and plan-time resolution as allowed_iam_role_names, and each entry must contain at least one literal character. Use for break-glass or audit-review roles, not for the instance roles that write session logs. Default: []
 
   # organization:                                 # (Optional) Delegation mode. When delegated is true ONLY the delegated administrator registrations are created — no bucket, key, log group or session document.
   #   delegated: false                            # (Optional) Run in delegation mode. Must be applied against the Organizations management account. Default: false
@@ -603,6 +604,30 @@ Three things to know:
   creates with `SystemsManagerJustInTimeNodeAccessManaged=true`, which AWS requires before an operator
   can be granted `kms:CreateGrant` on it. Supply that tag yourself if you bring your own key.
 
+### Granting administrative roles full access to the audit bucket
+
+`settings.allowed_iam_role_names` grants the write-only pair the instance roles need. Roles that have to
+read, list or clean up session logs go in `settings.admin_iam_role_names` instead, which grants `s3:*` on
+the bucket. Both accept exact names and `*` / `?` wildcards, resolved at plan time.
+
+```yaml
+settings:
+  allowed_iam_role_names:
+    - "ssm-instance-*"
+  admin_iam_role_names:
+    - "SecurityAudit"
+    - "breakglass-*"
+```
+
+Because the bucket is SSE-KMS encrypted, `s3:*` on its own cannot read an object body or write a new one,
+so these roles are also added to the KMS key policy with the same data plane actions the write roles get:
+`kms:Encrypt`, `kms:Decrypt`, `kms:ReEncrypt*`, `kms:GenerateDataKey*` and `kms:Describe*`. They are
+deliberately **not** granted `kms:*`, which would let them rewrite the key policy or schedule the key for
+deletion.
+
+An entry made only of wildcards is rejected — `"*"` would hand every role in the account full access to
+the audit logs.
+
 ### Quick Setup host management and patch scanning for the whole account
 
 Targets every instance in this account and Region. `target_type: "*"` is the local-account form; no
@@ -708,9 +733,9 @@ Available targets:
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.35 |
-| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | >= 1.40 |
-| <a name="provider_random"></a> [random](#provider\_random) | n/a |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.62.0 |
+| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | 1.100.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 
 ## Modules
 
@@ -766,6 +791,7 @@ Available targets:
 
 | Name | Description |
 | ---- | ----------- |
+| <a name="output_admin_iam_role_arns"></a> [admin\_iam\_role\_arns](#output\_admin\_iam\_role\_arns) | Resolved list of IAM role ARNs granted s3:* on the audit bucket, from the exact names and wildcard patterns in settings.admin\_iam\_role\_names. |
 | <a name="output_allowed_iam_role_arns"></a> [allowed\_iam\_role\_arns](#output\_allowed\_iam\_role\_arns) | Resolved list of IAM role ARNs granted access to the audit bucket and KMS key, merging settings.allowed\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.allowed\_iam\_role\_names. |
 | <a name="output_audit_bucket_arn"></a> [audit\_bucket\_arn](#output\_audit\_bucket\_arn) | ARN of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
 | <a name="output_audit_bucket_id"></a> [audit\_bucket\_id](#output\_audit\_bucket\_id) | Name of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |

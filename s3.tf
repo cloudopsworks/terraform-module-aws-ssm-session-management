@@ -51,6 +51,21 @@ locals {
         "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
       ]
     }] : [],
+    # Administrative roles get the whole bucket rather than the write-only pair above, so
+    # they can read, list and clean up session logs. Kept as a separate statement because
+    # the two sets of principals carry different actions.
+    local.has_admin_iam_roles ? [{
+      Sid    = "AllowIAMAdminRolesAccess"
+      Effect = "Allow"
+      Principal = {
+        AWS = local.admin_iam_role_arns
+      }
+      Action = "s3:*"
+      Resource = [
+        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}/*",
+        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
+      ]
+    }] : [],
     # Resource data sync delivers Inventory data as the service principal, not as a role in
     # this account, so it needs its own grant even though the bucket is account-owned. The
     # two statements are gated separately because they carry different shapes, and a single
