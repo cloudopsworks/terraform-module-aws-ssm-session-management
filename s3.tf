@@ -51,16 +51,40 @@ locals {
         "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
       ]
     }] : [],
-    # Administrative roles get the whole bucket rather than the write-only pair above, so
-    # they can read, list and clean up session logs. Kept as a separate statement because
-    # the two sets of principals carry different actions.
+    # Administrative roles get full object lifecycle on the bucket -- read, create, delete,
+    # multipart and listing -- rather than the write-only pair above, so they can review and
+    # clean up session logs and recordings. Deliberately enumerated rather than "s3:*":
+    # the wildcard also carries s3:PutBucketPolicy, s3:DeleteBucketPolicy, s3:DeleteBucket
+    # and s3:PutEncryptionConfiguration, which would let an audit reader rewrite this very
+    # policy, drop the TLS denies, weaken the bucket's encryption or delete the bucket.
     local.has_admin_iam_roles ? [{
       Sid    = "AllowIAMAdminRolesAccess"
       Effect = "Allow"
       Principal = {
         AWS = local.admin_iam_role_arns
       }
-      Action = "s3:*"
+      Action = [
+        # Read
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "s3:GetObjectAttributes",
+        "s3:GetObjectVersionAttributes",
+        # Create
+        "s3:PutObject",
+        # Delete
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
+        # Multipart, needed for and after large uploads such as RDP recordings
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts",
+        "s3:ListBucketMultipartUploads",
+        # List and discovery
+        "s3:ListBucket",
+        "s3:ListBucketVersions",
+        "s3:GetBucketLocation",
+        # Encryption discovery, so a client can resolve the bucket's CMK before writing
+        "s3:GetEncryptionConfiguration",
+      ]
       Resource = [
         "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}/*",
         "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"

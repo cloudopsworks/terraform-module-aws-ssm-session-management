@@ -68,7 +68,7 @@ output "allowed_iam_role_arns" {
 }
 
 output "admin_iam_role_arns" {
-  description = "Resolved list of IAM role ARNs granted s3:* on the audit bucket, merging settings.admin_iam_role_arns with the exact names and wildcard patterns resolved from settings.admin_iam_role_names."
+  description = "Resolved list of IAM role ARNs granted full object access on the audit bucket (read, create, delete, multipart and listing), merging settings.admin_iam_role_arns with the exact names and wildcard patterns resolved from settings.admin_iam_role_names."
   value       = local.admin_iam_role_arns
 }
 

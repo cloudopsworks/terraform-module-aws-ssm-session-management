@@ -68,7 +68,7 @@
 
 | Name | Description |
 | ---- | ----------- |
-| <a name="output_admin_iam_role_arns"></a> [admin\_iam\_role\_arns](#output\_admin\_iam\_role\_arns) | Resolved list of IAM role ARNs granted s3:* on the audit bucket, merging settings.admin\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.admin\_iam\_role\_names. |
+| <a name="output_admin_iam_role_arns"></a> [admin\_iam\_role\_arns](#output\_admin\_iam\_role\_arns) | Resolved list of IAM role ARNs granted full object access on the audit bucket (read, create, delete, multipart and listing), merging settings.admin\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.admin\_iam\_role\_names. |
 | <a name="output_allowed_iam_role_arns"></a> [allowed\_iam\_role\_arns](#output\_allowed\_iam\_role\_arns) | Resolved list of IAM role ARNs granted access to the audit bucket and KMS key, merging settings.allowed\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.allowed\_iam\_role\_names. |
 | <a name="output_audit_bucket_arn"></a> [audit\_bucket\_arn](#output\_audit\_bucket\_arn) | ARN of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
 | <a name="output_audit_bucket_id"></a> [audit\_bucket\_id](#output\_audit\_bucket\_id) | Name of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
