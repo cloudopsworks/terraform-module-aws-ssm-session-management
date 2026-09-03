@@ -50,8 +50,14 @@ It ensures that all sessions are logged to a secure S3 bucket and optionally to 
 
 The module creates a regional `SSM-SessionManagerRunShell` Session document holding the Session Manager
 preferences, an encrypted S3 bucket with a tiered lifecycle policy for audit logs, an optional CloudWatch
-log group, and the KMS key protecting both. Roles that need to write audit logs may be granted access by
-ARN or by role name.
+log group, and the KMS key protecting both. Access to those audit logs is granted in two tiers:
+`settings.allowed_iam_role_names` (or `allowed_iam_role_arns`) grants the write-only pair that the
+instance roles writing session logs need, while `settings.admin_iam_role_names` grants full object
+access — read, create, delete, multipart and listing — for roles that have to review or clean up the
+logs. Both name lists accept exact names and
+`*` / `?` wildcards, resolved at plan time, and each has an ARN counterpart —
+`settings.allowed_iam_role_arns` and `settings.admin_iam_role_arns` — for roles outside this account that
+cannot be looked up by name.
 
 Under `settings.fleet_manager` the module also configures the Fleet Manager side of Systems Manager.
 All of it is opt-in and account and Region wide:
@@ -67,7 +73,9 @@ All of it is opt-in and account and Region wide:
   audit bucket this module already manages and adding the bucket policy and KMS grants the service
   requires.
 
-- **Remote Desktop connection recording** records RDP connections to S3. This is the only separately
+- **Remote Desktop connection recording** records RDP connections to S3. The audit bucket is created with
+  `BucketOwnerEnforced` object ownership so these recordings are owned by the account that owns the
+  bucket — see the caveat below. This is the only separately
   configurable Remote Desktop setting — a connection otherwise applies the same Session Manager
   preferences written to the `SSM-SessionManagerRunShell` document. It requires just-in-time node
   access, which this module cannot enable; see the caveat below.
@@ -152,6 +160,8 @@ settings:
   # random_bucket_suffix: true                    # (Optional) Deprecated, use bucket.random_suffix instead. Default: true
   # allowed_iam_role_arns: []                     # (Optional) IAM role ARNs allowed to write to the audit bucket and use the KMS key. Default: []
   # allowed_iam_role_names: []                    # (Optional) IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Supports "*" and "?" wildcards, e.g. "ssm-*" or "*-instance-role". Resolved by listing roles at plan time, so a role created later that matches an existing pattern is picked up on the next plan. Each entry must contain at least one literal character. Default: []
+  # admin_iam_role_arns: []                       # (Optional) IAM role ARNs granted full object access on the audit bucket (read, create, delete, multipart, listing and encryption discovery), plus the KMS data plane actions that access depends on. Merged with whatever admin_iam_role_names resolves to. Use for cross-account roles, which cannot be looked up by name. Default: []
+  # admin_iam_role_names: []                      # (Optional) IAM role names in the current account granted full object access on the audit bucket -- GetObject, PutObject, DeleteObject, their versioned and multipart counterparts, ListBucket and GetEncryptionConfiguration -- plus the KMS Encrypt/Decrypt/GenerateDataKey actions that access depends on (the bucket is SSE-KMS, so S3 actions alone cannot read an object body). Not s3:*, which would also permit rewriting the bucket policy or deleting the bucket. Same "*"/"?" wildcard support and plan-time resolution as allowed_iam_role_names, and each entry must contain at least one literal character. Use for break-glass or audit-review roles, not for the instance roles that write session logs. Default: []
 
   # organization:                                 # (Optional) Delegation mode. When delegated is true ONLY the delegated administrator registrations are created — no bucket, key, log group or session document.
   #   delegated: false                            # (Optional) Run in delegation mode. Must be applied against the Organizations management account. Default: false
@@ -379,6 +389,8 @@ inputs = {
    `settings.fleet_manager.default_host_management` to adopt the fleet without instance profiles instead.
    To roll the same adoption out across organizational units, use `settings.dhmc` instead, and add
    `settings.host_management` or `settings.patch` for agent updates, inventory and patching.
+   Roles that need to read or clean up the logs rather than write them go under
+   `settings.admin_iam_role_names`.
 4. Run `terragrunt plan` to review the resources to be created.
 5. Run `terragrunt apply` to deploy the configuration.
 
@@ -446,10 +458,16 @@ Two behaviours to be aware of when using wildcards:
   so a role created later that matches an existing pattern is added to the bucket and KMS key policies
   on the next apply, with no change to this configuration. Exact names do not behave this way.
 - **A pattern that matches nothing is silent.** A misspelled exact name fails the plan; a misspelled
-  pattern simply grants no access. Check the `allowed_iam_role_arns` output to see what actually resolved.
+  pattern simply grants no access. Check the `allowed_iam_role_arns` and `admin_iam_role_arns` outputs to
+  see what actually resolved.
 
 Wildcards require `iam:ListRoles` in addition to the `iam:GetRole` needed for exact names. A pattern
 made up only of wildcards is rejected, since it would match every role in the account.
+
+Every rule in this section applies identically to `settings.admin_iam_role_names`, which is resolved
+through the same lookups — a name appearing in both lists is only queried once. The difference is the
+grant each list produces, covered under *Granting administrative roles full access to the audit bucket*
+below.
 
 ### Reusing an existing KMS key
 
@@ -603,6 +621,56 @@ Three things to know:
   creates with `SystemsManagerJustInTimeNodeAccessManaged=true`, which AWS requires before an operator
   can be granted `kms:CreateGrant` on it. Supply that tag yourself if you bring your own key.
 
+### Granting administrative roles full access to the audit bucket
+
+`settings.allowed_iam_role_names` grants the write-only pair the instance roles need. Roles that have to
+read, list or clean up session logs go in `settings.admin_iam_role_names` instead, which grants full
+object access on the bucket. Both accept exact names and `*` / `?` wildcards, resolved at plan time.
+
+```yaml
+settings:
+  allowed_iam_role_names:
+    - "ssm-instance-*"
+  admin_iam_role_names:
+    - "SecurityAudit"
+    - "breakglass-*"
+  admin_iam_role_arns:
+    - "arn:aws:iam::123456789012:role/central-audit-reader"
+```
+
+`admin_iam_role_arns` is merged with whatever `admin_iam_role_names` resolves to, exactly as
+`allowed_iam_role_arns` is merged into the write tier. Use it for roles in another account, which cannot
+be resolved by name from here.
+
+The grant is enumerated rather than `s3:*`:
+
+| Purpose | Actions |
+|---------|---------|
+| Read | `s3:GetObject`, `s3:GetObjectVersion`, `s3:GetObjectAttributes`, `s3:GetObjectVersionAttributes` |
+| Create | `s3:PutObject` |
+| Delete | `s3:DeleteObject`, `s3:DeleteObjectVersion` |
+| Multipart | `s3:AbortMultipartUpload`, `s3:ListMultipartUploadParts`, `s3:ListBucketMultipartUploads` |
+| List | `s3:ListBucket`, `s3:ListBucketVersions`, `s3:GetBucketLocation` |
+| Encryption | `s3:GetEncryptionConfiguration` |
+
+Because the bucket is SSE-KMS encrypted, those S3 actions on their own cannot read an object body or
+write a new one, so these roles are also added to the KMS key policy with the same data plane actions the
+write roles get: `kms:Encrypt`, `kms:Decrypt`, `kms:ReEncrypt*`, `kms:GenerateDataKey*` and
+`kms:Describe*`.
+
+What is deliberately **excluded**, and why `s3:*` is not used: `s3:PutBucketPolicy` and
+`s3:DeleteBucketPolicy` would let an audit reader rewrite this very policy and remove the TLS and
+transport denies; `s3:PutEncryptionConfiguration` would let them weaken or repoint the bucket's
+encryption; `s3:PutLifecycleConfiguration` would let them shorten the retention the bucket exists to
+guarantee; and `s3:DeleteBucket` speaks for itself. On the KMS side they are likewise not granted
+`kms:*`, which would allow rewriting the key policy or scheduling the key for deletion.
+
+If a role genuinely needs those bucket-administration actions, grant them through that role's own
+identity policy rather than widening this statement for every admin principal.
+
+An entry made only of wildcards is rejected — `"*"` would hand every role in the account full access to
+the audit logs.
+
 ### Quick Setup host management and patch scanning for the whole account
 
 Targets every instance in this account and Region. `target_type: "*"` is the local-account form; no
@@ -669,6 +737,30 @@ settings:
     target_regions: "us-east-1,us-west-2"
     collect_inventory: true
 ```
+
+### Object ownership and Remote Desktop recordings
+
+The audit bucket is created with `ObjectOwnership: BucketOwnerEnforced`, which disables ACLs and makes
+the bucket owner the owner of every object regardless of who uploaded it.
+
+This is not cosmetic. Under the previous `BucketOwnerPreferred` setting, the bucket owner only took
+ownership when the uploader supplied the `bucket-owner-full-control` ACL, and the GUI Connect service
+that uploads Remote Desktop recordings does not supply one. Those recordings ended up owned by an AWS
+service account, and **a bucket policy cannot grant access to objects the bucket owner does not own** —
+object ACLs govern, and only the object owner can change them. The result was a recording that uploaded
+successfully, at full size, that nobody in the account could ever read. No bucket policy grant fixed it,
+including everything `settings.admin_iam_role_names` grants, because S3 denied the request at authorization
+before it ever reached the object.
+
+Two consequences worth knowing:
+
+- **Ownership is not retroactive.** Recordings written before this change remain owned by the service
+  account and stay unreadable permanently. The bucket owner can delete them, but never read them. Only
+  recordings written after the change are accessible.
+- **ACLs are disabled on the bucket.** Nothing in this module sets one, and the resource data sync grant
+  no longer requires the `bucket-owner-full-control` canned ACL — `aws:SourceAccount` and `aws:SourceArn`
+  remain the constraints on that statement. If you attach your own policy or tooling that sets an object
+  ACL, it will fail with `AccessControlListNotSupported`.
 
 ### Delegation mode
 
@@ -766,6 +858,7 @@ Available targets:
 
 | Name | Description |
 | ---- | ----------- |
+| <a name="output_admin_iam_role_arns"></a> [admin\_iam\_role\_arns](#output\_admin\_iam\_role\_arns) | Resolved list of IAM role ARNs granted full object access on the audit bucket (read, create, delete, multipart and listing), merging settings.admin\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.admin\_iam\_role\_names. |
 | <a name="output_allowed_iam_role_arns"></a> [allowed\_iam\_role\_arns](#output\_allowed\_iam\_role\_arns) | Resolved list of IAM role ARNs granted access to the audit bucket and KMS key, merging settings.allowed\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.allowed\_iam\_role\_names. |
 | <a name="output_audit_bucket_arn"></a> [audit\_bucket\_arn](#output\_audit\_bucket\_arn) | ARN of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
 | <a name="output_audit_bucket_id"></a> [audit\_bucket\_id](#output\_audit\_bucket\_id) | Name of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |

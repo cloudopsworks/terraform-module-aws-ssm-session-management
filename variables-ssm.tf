@@ -11,6 +11,8 @@
 #   random_bucket_suffix: true                      # (Optional) Deprecated, use bucket.random_suffix instead. Default: true
 #   allowed_iam_role_arns: []                       # (Optional) List of IAM role ARNs allowed to access the S3 bucket and KMS key. Default: []
 #   allowed_iam_role_names: []                      # (Optional) List of IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Entries may use "*" and "?" wildcards (e.g. "ssm-*"), which are resolved by listing roles at plan time. Default: []
+#   admin_iam_role_arns: []                         # (Optional) IAM role ARNs granted full object access on the audit bucket (read, create, delete, multipart, listing and encryption discovery), plus the KMS data plane actions that access depends on. Merged with whatever admin_iam_role_names resolves to. Use for cross-account roles, which cannot be looked up by name. Default: []
+#   admin_iam_role_names: []                        # (Optional) IAM role names in the current account granted full object access on the audit bucket -- GetObject, PutObject, DeleteObject, their versioned and multipart counterparts, ListBucket and GetEncryptionConfiguration -- plus the KMS Encrypt/Decrypt/GenerateDataKey actions that access depends on (the bucket is SSE-KMS, so S3 actions alone cannot read an object body). Not s3:*, which would also permit rewriting the bucket policy or deleting the bucket. Same "*"/"?" wildcard support and plan-time resolution as allowed_iam_role_names, and each entry must contain at least one literal character. Default: []
 #   organization:                                   # (Optional) Organization delegation settings. When delegated is true ONLY the delegated administrator registrations are created.
 #     delegated: false                              # (Optional) Whether to run in delegation mode, registering SSM delegated administrators instead of session logging resources. Default: false
 #     account_id: ""                                # (Required when delegated is true) Account ID to register as SSM delegated administrator.
@@ -169,6 +171,14 @@ variable "settings" {
       for name in try(var.settings.allowed_iam_role_names, []) : can(regex("[^*?]", name))
     ])
     error_message = "Each settings.allowed_iam_role_names entry must contain at least one literal character. A pattern of only wildcards would match every IAM role in the account."
+  }
+
+  # Same guard as above, and it matters more here: these roles can delete audit objects.
+  validation {
+    condition = alltrue([
+      for name in try(var.settings.admin_iam_role_names, []) : can(regex("[^*?]", name))
+    ])
+    error_message = "Each settings.admin_iam_role_names entry must contain at least one literal character. A pattern of only wildcards would grant every IAM role in the account full object access to the audit bucket."
   }
 
   validation {

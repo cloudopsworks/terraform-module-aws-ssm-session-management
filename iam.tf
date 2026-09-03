@@ -12,13 +12,18 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
-  requested_iam_role_names = try(var.settings.allowed_iam_role_names, [])
+  requested_iam_role_names       = try(var.settings.allowed_iam_role_names, [])
+  requested_admin_iam_role_names = try(var.settings.admin_iam_role_names, [])
+
+  # Both lists resolve through the same lookups, so a name appearing in each is only
+  # queried once and the data source keys stay stable regardless of which list it came from.
+  all_requested_iam_role_names = distinct(concat(local.requested_iam_role_names, local.requested_admin_iam_role_names))
 
   # IAM role names are limited to [A-Za-z0-9_+=,.@-], so neither "*" nor "?" can occur in
   # a real name. Their presence therefore marks an entry as a wildcard pattern with no
   # ambiguity, and no separate settings key is needed to tell the two apart.
-  exact_iam_role_names    = [for name in local.requested_iam_role_names : name if !can(regex("[*?]", name))]
-  wildcard_iam_role_globs = [for name in local.requested_iam_role_names : name if can(regex("[*?]", name))]
+  exact_iam_role_names    = [for name in local.all_requested_iam_role_names : name if !can(regex("[*?]", name))]
+  wildcard_iam_role_globs = [for name in local.all_requested_iam_role_names : name if can(regex("[*?]", name))]
 
   # Glob to anchored RE2, as consumed by the name_regex filter below. Escape the only two
   # regex metacharacters that are legal in an IAM role name ("." and "+") before expanding
@@ -49,9 +54,18 @@ locals {
   # Sorted and de-duplicated so the rendered policy documents stay stable across plans.
   allowed_iam_role_arns = sort(distinct(concat(
     try(var.settings.allowed_iam_role_arns, []),
-    [for role in data.aws_iam_role.allowed : role.arn],
-    flatten([for result in data.aws_iam_roles.allowed_wildcard : tolist(result.arns)]),
+    [for name in local.requested_iam_role_names : data.aws_iam_role.allowed[name].arn if !can(regex("[*?]", name))],
+    flatten([for name in local.requested_iam_role_names : tolist(data.aws_iam_roles.allowed_wildcard[name].arns) if can(regex("[*?]", name))]),
+  )))
+
+  # Administrative roles are granted full object access on the bucket rather than the write-only
+  # pair above, so they are resolved separately and never folded into the list above.
+  admin_iam_role_arns = sort(distinct(concat(
+    try(var.settings.admin_iam_role_arns, []),
+    [for name in local.requested_admin_iam_role_names : data.aws_iam_role.allowed[name].arn if !can(regex("[*?]", name))],
+    flatten([for name in local.requested_admin_iam_role_names : tolist(data.aws_iam_roles.allowed_wildcard[name].arns) if can(regex("[*?]", name))]),
   )))
 
   has_allowed_iam_roles = length(local.allowed_iam_role_arns) > 0
+  has_admin_iam_roles   = length(local.admin_iam_role_arns) > 0
 }

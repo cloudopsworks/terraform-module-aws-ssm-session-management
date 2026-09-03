@@ -51,6 +51,45 @@ locals {
         "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
       ]
     }] : [],
+    # Administrative roles get full object lifecycle on the bucket -- read, create, delete,
+    # multipart and listing -- rather than the write-only pair above, so they can review and
+    # clean up session logs and recordings. Deliberately enumerated rather than "s3:*":
+    # the wildcard also carries s3:PutBucketPolicy, s3:DeleteBucketPolicy, s3:DeleteBucket
+    # and s3:PutEncryptionConfiguration, which would let an audit reader rewrite this very
+    # policy, drop the TLS denies, weaken the bucket's encryption or delete the bucket.
+    local.has_admin_iam_roles ? [{
+      Sid    = "AllowIAMAdminRolesAccess"
+      Effect = "Allow"
+      Principal = {
+        AWS = local.admin_iam_role_arns
+      }
+      Action = [
+        # Read
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "s3:GetObjectAttributes",
+        "s3:GetObjectVersionAttributes",
+        # Create
+        "s3:PutObject",
+        # Delete
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
+        # Multipart, needed for and after large uploads such as RDP recordings
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts",
+        "s3:ListBucketMultipartUploads",
+        # List and discovery
+        "s3:ListBucket",
+        "s3:ListBucketVersions",
+        "s3:GetBucketLocation",
+        # Encryption discovery, so a client can resolve the bucket's CMK before writing
+        "s3:GetEncryptionConfiguration",
+      ]
+      Resource = [
+        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}/*",
+        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
+      ]
+    }] : [],
     # Resource data sync delivers Inventory data as the service principal, not as a role in
     # this account, so it needs its own grant even though the bucket is account-owned. The
     # two statements are gated separately because they carry different shapes, and a single
@@ -72,9 +111,11 @@ locals {
       }
       Action   = "s3:PutObject"
       Resource = local.resource_data_sync_object_pattern
+      # No s3:x-amz-acl condition: ACLs are disabled on this bucket, and AWS documents that
+      # requiring the canned ACL denies callers that correctly omit it. aws:SourceAccount
+      # and aws:SourceArn remain the real constraints.
       Condition = {
         StringEquals = {
-          "s3:x-amz-acl"      = "bucket-owner-full-control"
           "aws:SourceAccount" = data.aws_caller_identity.current.account_id
         }
         ArnLike = {
@@ -122,7 +163,6 @@ module "ssm_bucket" {
   version                               = "~> 5.10"
   create_bucket                         = !local.is_delegated
   bucket                                = local.ssm_logs_bucket
-  acl                                   = "private"
   block_public_acls                     = true
   block_public_policy                   = true
   ignore_public_acls                    = true
@@ -135,8 +175,20 @@ module "ssm_bucket" {
     Version   = "2012-10-17"
     Statement = local.bucket_policy_statements
   }) : null
+
+  # BucketOwnerEnforced, not BucketOwnerPreferred. Under Preferred the bucket owner only
+  # takes ownership of an object when the uploader sets the bucket-owner-full-control ACL,
+  # and Fleet Manager Remote Desktop recordings are uploaded by the GUI Connect service
+  # without one. Those recordings stayed owned by an AWS service account, and a bucket
+  # policy cannot grant access to objects the bucket owner does not own -- so the account
+  # paying for the bucket could never read its own recordings, whatever the policy said.
+  # Enforced disables ACLs outright and makes the bucket owner own every object.
+  #
+  # No "acl" argument here on purpose: the upstream module creates an aws_s3_bucket_acl
+  # whenever acl is non-null, and setting an ACL on an enforced-ownership bucket fails with
+  # AccessControlListNotSupported.
   control_object_ownership = true
-  object_ownership         = "BucketOwnerPreferred"
+  object_ownership         = "BucketOwnerEnforced"
 
   versioning = {
     enabled = try(var.settings.bucket.versioning, false)

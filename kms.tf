@@ -138,6 +138,25 @@ resource "aws_kms_key" "this" {
           "kms:Describe*"
         ]
         Resource = "*"
+      }] : [],
+      # The bucket is SSE-KMS encrypted, so S3 actions on their own cannot read an object body or
+      # write a new one. Administrative roles get the same data plane actions as the roles
+      # above -- deliberately not kms:*, which would let them rewrite this policy or
+      # schedule the key for deletion.
+      local.has_admin_iam_roles ? [{
+        Sid    = "AllowIAMAdminRolesAccess"
+        Effect = "Allow"
+        Principal = {
+          AWS = local.admin_iam_role_arns
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:Describe*"
+        ]
+        Resource = "*"
       }] : []
     )
   })
