@@ -53,6 +53,21 @@ introduction: |-
   Recording preferences are exposed only through Cloud Control, so the module also requires the `awscc`
   provider. Nothing from that provider is created unless recording is turned on.
 
+  **The `awscc` provider has to be configured with the same Region and role as `aws`.** It is a separate
+  provider with its own credential and Region resolution, so a Terragrunt `root.hcl` that generates only an
+  `aws` provider block leaves `awscc` falling back to `AWS_REGION` and the default profile. Because Cloud
+  Control is a regional API, a mismatch does not fail loudly — it reads an empty result, which surfaces as
+  `Cannot import non-existent remote object` when importing existing preferences, or as a plan that wants to
+  create `awscc_ssmguiconnect_preferences` even though the account already has them, and then fails on apply.
+  The scaffolded `terragrunt.hcl` generates the matching `awscc` provider block for this reason.
+
+  Note that `awscc` is plugin-framework based, so its `assume_role` is a nested attribute assigned with `=`,
+  not a block as in the `aws` provider.
+
+  These recording preferences are also a **singleton per AWS account** — `account_id` is the resource's whole
+  identifier. Only one deployment in an account can own `awscc_ssmguiconnect_preferences`; a second one
+  enabling recording will collide with the first and the two will overwrite each other's bucket and key.
+
   Separately from `settings.fleet_manager`, the top level `settings.dhmc`, `settings.host_management` and
   `settings.patch` blocks drive **SSM Quick Setup** configuration managers. Where the Fleet Manager block
   creates individual resources in this account and Region, Quick Setup hands a configuration to Systems
@@ -297,6 +312,23 @@ usage: |-
 
   include "root" {
     path = find_in_parent_folders("root.hcl")
+    # Exposes the root config so the awscc provider below can reuse its region and role.
+    expose = true
+  }
+
+  # root.hcl generates the aws provider only; awscc needs the same region and role.
+  generate "provider_awscc" {
+    path      = "provider-awscc.g.tf"
+    if_exists = "overwrite_terragrunt"
+    contents  = <<EOF
+  provider "awscc" {
+    region = "${include.root.locals.region}"
+    assume_role = {
+      role_arn     = "${include.root.locals.sts_role_arn}"
+      session_name = "terragrunt"
+    }
+  }
+  EOF
   }
 
   terraform {
