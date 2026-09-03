@@ -28,8 +28,11 @@ introduction: |-
 
   The module creates a regional `SSM-SessionManagerRunShell` Session document holding the Session Manager
   preferences, an encrypted S3 bucket with a tiered lifecycle policy for audit logs, an optional CloudWatch
-  log group, and the KMS key protecting both. Roles that need to write audit logs may be granted access by
-  ARN or by role name.
+  log group, and the KMS key protecting both. Access to those audit logs is granted in two tiers:
+  `settings.allowed_iam_role_names` (or `allowed_iam_role_arns`) grants the write-only pair that the
+  instance roles writing session logs need, while `settings.admin_iam_role_names` grants `s3:*` on the
+  bucket for roles that have to read, list or clean up the logs. Both name lists accept exact names and
+  `*` / `?` wildcards, resolved at plan time.
 
   Under `settings.fleet_manager` the module also configures the Fleet Manager side of Systems Manager.
   All of it is opt-in and account and Region wide:
@@ -408,10 +411,16 @@ examples: |-
     so a role created later that matches an existing pattern is added to the bucket and KMS key policies
     on the next apply, with no change to this configuration. Exact names do not behave this way.
   - **A pattern that matches nothing is silent.** A misspelled exact name fails the plan; a misspelled
-    pattern simply grants no access. Check the `allowed_iam_role_arns` output to see what actually resolved.
+    pattern simply grants no access. Check the `allowed_iam_role_arns` and `admin_iam_role_arns` outputs to
+    see what actually resolved.
 
   Wildcards require `iam:ListRoles` in addition to the `iam:GetRole` needed for exact names. A pattern
   made up only of wildcards is rejected, since it would match every role in the account.
+
+  Every rule in this section applies identically to `settings.admin_iam_role_names`, which is resolved
+  through the same lookups — a name appearing in both lists is only queried once. The difference is the
+  grant each list produces, covered under *Granting administrative roles full access to the audit bucket*
+  below.
 
   ### Reusing an existing KMS key
 
@@ -676,6 +685,8 @@ quickstart: |-
      `settings.fleet_manager.default_host_management` to adopt the fleet without instance profiles instead.
      To roll the same adoption out across organizational units, use `settings.dhmc` instead, and add
      `settings.host_management` or `settings.patch` for agent updates, inventory and patching.
+     Roles that need to read or clean up the logs rather than write them go under
+     `settings.admin_iam_role_names`.
   4. Run `terragrunt plan` to review the resources to be created.
   5. Run `terragrunt apply` to deploy the configuration.
 
