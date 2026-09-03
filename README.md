@@ -15,7 +15,7 @@
  [![Latest Release](https://img.shields.io/github/release/cloudopsworks/terraform-module-aws-ssm-session-management.svg?style=for-the-badge)](https://github.com/cloudopsworks/terraform-module-aws-ssm-session-management/releases/latest) [![Last Updated](https://img.shields.io/github/last-commit/cloudopsworks/terraform-module-aws-ssm-session-management.svg?style=for-the-badge)](https://github.com/cloudopsworks/terraform-module-aws-ssm-session-management/commits)
 
 
-This module sets up AWS SSM Session Manager and Fleet Manager settings, including S3 bucket for audit logs, CloudWatch Log Group, KMS encryption for both, Default Host Management Configuration, Inventory collection, resource data sync and Remote Desktop connection recording.
+This module sets up AWS SSM Session Manager and Fleet Manager settings, including S3 bucket for audit logs, CloudWatch Log Group, KMS encryption for both, Default Host Management Configuration, Inventory collection, resource data sync and Remote Desktop connection recording. It also drives SSM Quick Setup configuration managers for Default Host Management, Host Management and Patch Policy, across a single account or a set of organizational units.
 
 
 ---
@@ -74,6 +74,42 @@ All of it is opt-in and account and Region wide:
 
 Recording preferences are exposed only through Cloud Control, so the module also requires the `awscc`
 provider. Nothing from that provider is created unless recording is turned on.
+
+**The `awscc` provider has to be configured with the same Region and role as `aws`.** It is a separate
+provider with its own credential and Region resolution, so a Terragrunt `root.hcl` that generates only an
+`aws` provider block leaves `awscc` falling back to `AWS_REGION` and the default profile. Because Cloud
+Control is a regional API, a mismatch does not fail loudly — it reads an empty result, which surfaces as
+`Cannot import non-existent remote object` when importing existing preferences, or as a plan that wants to
+create `awscc_ssmguiconnect_preferences` even though the account already has them, and then fails on apply.
+The scaffolded `terragrunt.hcl` generates the matching `awscc` provider block for this reason.
+
+Note that `awscc` is plugin-framework based, so its `assume_role` is a nested attribute assigned with `=`,
+not a block as in the `aws` provider.
+
+These recording preferences are also a **singleton per AWS account** — `account_id` is the resource's whole
+identifier. Only one deployment in an account can own `awscc_ssmguiconnect_preferences`; a second one
+enabling recording will collide with the first and the two will overwrite each other's bucket and key.
+
+Separately from `settings.fleet_manager`, the top level `settings.dhmc`, `settings.host_management` and
+`settings.patch` blocks drive **SSM Quick Setup** configuration managers. Where the Fleet Manager block
+creates individual resources in this account and Region, Quick Setup hands a configuration to Systems
+Manager and lets it deploy and maintain the underlying StackSets, associations and roles:
+
+- **`settings.dhmc`** rolls Default Host Management Configuration out across organizational units, so
+  every EC2 instance in them becomes a managed node without an instance profile. This is the
+  organization-wide counterpart to `settings.fleet_manager.default_host_management`, which configures the
+  same feature in the current account only. Use one or the other, not both.
+- **`settings.host_management`** configures SSM Agent and EC2 Launch agent updates, inventory collection,
+  daily patch scanning and the CloudWatch agent on the targeted instances.
+- **`settings.patch`** creates a Patch Policy that scans, or scans and installs, missing patches on a cron
+  schedule against the AWS provided patch baselines resolved at plan time.
+
+Each of the three targets either the current account — through `target_type`, which selects every
+instance, an instance ID list, a tag pair or a resource group — or a set of organizational units through
+`target_organizational_units`. The two are mutually exclusive, and an organization-wide deployment has to
+be applied from the Quick Setup delegated administrator account, which delegation mode below registers.
+`settings.patch` additionally depends on the `AWS-QuickSetup-PatchPolicy` local deployment roles existing
+in the target account.
 
 It also runs in a second, mutually exclusive mode: when `settings.organization.delegated` is `true` the
 module creates **only** the SSM delegated administrator registrations in the Organizations management
@@ -204,6 +240,72 @@ settings:
   #     prefix: "inventory"                       # (Optional) Key prefix for the synchronised data. Set to "" to write at the bucket root. Default: "inventory"
   #     region: ""                                # (Optional) Region of the destination bucket. Default: "" (the region this module is applied in)
   #     kms_key_arn: ""                           # (Optional) KMS key ARN used to encrypt the synchronised data. Default: "" (this module's key when the audit bucket is the destination)
+
+  # ---------------------------------------------------------------------------------
+  # SSM Quick Setup configuration managers.
+  #
+  # These three blocks are independent of fleet_manager above: they deploy AWS Systems
+  # Manager Quick Setup configurations rather than individual resources, and each one can
+  # target this account or a set of organizational units. All are ignored in delegation
+  # mode. Organization-wide deployments must be applied from the Quick Setup delegated
+  # administrator account — the account registered through settings.organization.
+  # ---------------------------------------------------------------------------------
+
+  # dhmc:                                         # (Optional) Quick Setup Default Host Management Configuration (AWSQuickSetupType-DHMC). Rolls DHMC out across organizational units, so every EC2 instance in them becomes a managed node without an instance profile.
+  #   enabled: false                              # (Optional) Create the DHMC Quick Setup configuration manager. Default: false
+  #   update_ssm_agent: true                      # (Optional) Update SSM Agent on target instances every two weeks. Default: true
+  #   target_organizational_units: "ou-abcd-1111" # (Required when enabled is true) Comma separated list of organizational unit IDs to deploy to. DHMC has no local-account targeting mode.
+  #   target_regions: "us-east-1"                 # (Optional) Comma separated list of regions to deploy to. Default: "" (the region this module is applied in)
+
+  # host_management:                              # (Optional) Quick Setup Host Management (AWSQuickSetupType-SSMHostMgmt). Configures agent updates, inventory collection, patch scanning and the CloudWatch agent on the targeted instances.
+  #   enabled: false                              # (Optional) Create the Host Management Quick Setup configuration manager. Default: false
+  #   update_ssm_agent: true                      # (Optional) Update SSM Agent on target instances every two weeks. Default: true
+  #   update_ec2_launch_agent: false              # (Optional) Update the EC2 Launch agent monthly. Windows only. Default: false
+  #   collect_inventory: true                     # (Optional) Collect instance metadata every 30 minutes. Do not combine with fleet_manager.inventory — Systems Manager permits only one inventory association per node. Default: true
+  #   scan_instances: true                        # (Optional) Scan target instances daily for missing patches. Default: true
+  #   install_cloudwatch_agent: false             # (Optional) Install the CloudWatch agent on target instances. Default: false
+  #   update_cloudwatch_agent: false              # (Optional) Update the CloudWatch agent monthly. Default: false
+  #   is_policy_attach_allowed: false             # (Optional) Allow Quick Setup to attach policies to instance profiles already associated with the target instances. Default: false
+  #   #
+  #   # Targeting: use EITHER target_type (local account) OR target_organizational_units
+  #   # (organization). Supplying both is rejected.
+  #   target_type: "*"                            # (Optional) How instances are targeted in this account. Values: "*" (every instance), InstanceIds, Tags, ResourceGroups. Leave unset when deploying to OUs. Default: "" (unset)
+  #   target_instances: "i-1234567890abcdef0"     # (Required when target_type is InstanceIds) Comma separated list of instance IDs.
+  #   target_tag_key: "Environment"               # (Required when target_type is Tags) Tag key assigned to the instances to target.
+  #   target_tag_value: "production"              # (Required when target_type is Tags) Value of that tag key.
+  #   resource_group_name: "my-group"             # (Required when target_type is ResourceGroups) Name of the resource group holding the instances to target.
+  #   target_organizational_units: "ou-abcd-1111" # (Optional) Comma separated list of organizational unit IDs to deploy to. Mutually exclusive with target_type. Default: ""
+  #   target_accounts: "123456789012"             # (Optional) Comma separated list of account IDs for a local deployment. Default: ""
+  #   target_regions: "us-east-1"                 # (Optional) Comma separated list of regions to deploy to. Default: "" (the region this module is applied in)
+
+  # patch:                                        # (Optional) Quick Setup Patch Policy (AWSQuickSetupType-PatchPolicy). Quick Setup must already have created the AWS-QuickSetup-PatchPolicy local deployment roles in this account — configure a patch policy once from the console, or let this module create the first one.
+  #   enabled: false                              # (Optional) Create the Patch Policy Quick Setup configuration manager. Default: false
+  #   policy_name: ""                             # (Optional) Name of the patch policy, also applied to target instances as a tag. Default: "" (the short system name)
+  #   operation: "Scan"                           # (Optional) Whether instances only scan for patches, or scan and install them. Values: Scan, ScanAndInstall. Default: "Scan"
+  #   scan_value: "cron(0 1 * * ? *)"             # (Optional) Cron expression scheduling the patch scan. Default: "cron(0 1 * * ? *)"
+  #   scan_next_interval: false                   # (Optional) Scan at the next cron interval instead of waiting a full cycle. Default: false
+  #   install_value: "cron(0 2 * * ? *)"          # (Optional) Cron expression scheduling the patch install. Only sent when operation is ScanAndInstall. Default: "" (falls back to scan_value)
+  #   install_next_interval: false                # (Optional) Install at the next cron interval. Only sent when operation is ScanAndInstall. Default: false
+  #   reboot_option: "RebootIfNeeded"             # (Optional) Whether instances reboot after patches install. Values: RebootIfNeeded, NoReboot. Default: "" (unset, AWS decides)
+  #   default_baselines: true                     # (Optional) Restrict the patch baseline lookup to AWS default baselines. Default: true
+  #   baseline_use: "default"                     # (Optional) Whether the selected baselines are all AWS provided. Values: default, custom. Default: "default"
+  #   baseline_region: "us-east-1"                # (Optional) Region where the patch baselines exist. Default: "" (the region this module is applied in)
+  #   rate_control_concurrency: "10%"             # (Optional) Instances patched at once, as a number or a percentage. Default: "10%"
+  #   rate_control_error_threshold: "2%"          # (Optional) Errors tolerated before the deployment stops, as a number or a percentage. Default: "2%"
+  #   is_policy_attach_allowed: false             # (Optional) Allow Quick Setup to attach policies to instance profiles already associated with the target instances. Default: false
+  #   output_s3_bucket_name: ""                   # (Optional) Bucket receiving patch command output logs. Output logging is enabled only when this is set. This module neither creates that bucket nor grants access to it. Default: "" (logging disabled)
+  #   output_s3_bucket_region: ""                 # (Optional) Region of that bucket. Default: "" (the region this module is applied in)
+  #   output_s3_key_prefix: ""                    # (Optional) Key prefix used within that bucket. Default: ""
+  #   #
+  #   # Targeting behaves exactly as documented under host_management above.
+  #   target_type: "*"                            # (Optional) How instances are targeted in this account. Values: "*", InstanceIds, Tags, ResourceGroups. Leave unset when deploying to OUs. Default: "" (unset)
+  #   target_instances: "i-1234567890abcdef0"     # (Required when target_type is InstanceIds) Comma separated list of instance IDs.
+  #   target_tag_key: "Environment"               # (Required when target_type is Tags) Tag key assigned to the instances to target.
+  #   target_tag_value: "production"              # (Required when target_type is Tags) Value of that tag key.
+  #   resource_group_name: "my-group"             # (Required when target_type is ResourceGroups) Name of the resource group holding the instances to target.
+  #   target_organizational_units: "ou-abcd-1111" # (Optional) Comma separated list of organizational unit IDs to deploy to. Mutually exclusive with target_type. Default: ""
+  #   target_accounts: "123456789012"             # (Optional) Comma separated list of account IDs for a local deployment. Default: ""
+  #   target_regions: "us-east-1"                 # (Optional) Comma separated list of regions to deploy to. Default: "" (the region this module is applied in)
 ```
 
 ### Generated `terragrunt.hcl`
@@ -237,6 +339,23 @@ locals {
 
 include "root" {
   path = find_in_parent_folders("root.hcl")
+  # Exposes the root config so the awscc provider below can reuse its region and role.
+  expose = true
+}
+
+# root.hcl generates the aws provider only; awscc needs the same region and role.
+generate "provider_awscc" {
+  path      = "provider-awscc.g.tf"
+  if_exists = "overwrite_terragrunt"
+  contents  = <<EOF
+provider "awscc" {
+  region = "${include.root.locals.region}"
+  assume_role = {
+    role_arn     = "${include.root.locals.sts_role_arn}"
+    session_name = "terragrunt"
+  }
+}
+EOF
 }
 
 terraform {
@@ -258,6 +377,8 @@ inputs = {
 2. Edit `inputs.yaml`; the defaults are usable as-is for a first deployment.
 3. Add the instance roles that will write session logs under `settings.allowed_iam_role_names`, or turn on
    `settings.fleet_manager.default_host_management` to adopt the fleet without instance profiles instead.
+   To roll the same adoption out across organizational units, use `settings.dhmc` instead, and add
+   `settings.host_management` or `settings.patch` for agent updates, inventory and patching.
 4. Run `terragrunt plan` to review the resources to be created.
 5. Run `terragrunt apply` to deploy the configuration.
 
@@ -482,6 +603,73 @@ Three things to know:
   creates with `SystemsManagerJustInTimeNodeAccessManaged=true`, which AWS requires before an operator
   can be granted `kms:CreateGrant` on it. Supply that tag yourself if you bring your own key.
 
+### Quick Setup host management and patch scanning for the whole account
+
+Targets every instance in this account and Region. `target_type: "*"` is the local-account form; no
+organizational units are involved, so this can be applied from any account.
+
+```yaml
+settings:
+  host_management:
+    enabled: true
+    target_type: "*"
+    update_ssm_agent: true
+    collect_inventory: true
+    scan_instances: true
+    install_cloudwatch_agent: true
+
+  patch:
+    enabled: true
+    target_type: "*"
+    operation: "Scan"
+    scan_value: "cron(0 1 * * ? *)"
+```
+
+Note that `host_management.collect_inventory` and `settings.fleet_manager.inventory` both create an
+inventory association, and Systems Manager permits only one per node. Pick whichever fits — the Quick
+Setup block for a fleet-wide rollout, the Fleet Manager block when the association needs its own
+schedule, targets or collection categories.
+
+### Quick Setup patch policy that installs, targeted by tag
+
+```yaml
+settings:
+  patch:
+    enabled: true
+    policy_name: "prod-linux-patching"
+    operation: "ScanAndInstall"
+    scan_value: "cron(0 1 * * ? *)"
+    install_value: "cron(0 3 ? * SUN *)"
+    reboot_option: "RebootIfNeeded"
+    rate_control_concurrency: "10%"
+    rate_control_error_threshold: "2%"
+    target_type: "Tags"
+    target_tag_key: "PatchGroup"
+    target_tag_value: "production"
+```
+
+`operation` accepts only `Scan` and `ScanAndInstall`. The install schedule is sent to AWS solely under
+`ScanAndInstall`, and falls back to `scan_value` when `install_value` is omitted.
+
+### Quick Setup across organizational units
+
+Applied from the Quick Setup delegated administrator account. `target_type` is left unset — supplying it
+alongside `target_organizational_units` is rejected.
+
+```yaml
+settings:
+  dhmc:
+    enabled: true
+    target_organizational_units: "ou-abcd-11111111,ou-abcd-22222222"
+    target_regions: "us-east-1,us-west-2"
+
+  host_management:
+    enabled: true
+    target_organizational_units: "ou-abcd-11111111,ou-abcd-22222222"
+    target_regions: "us-east-1,us-west-2"
+    collect_inventory: true
+```
+
 ### Delegation mode
 
 Applied against the Organizations management account. Creates only the delegated administrator
@@ -511,7 +699,7 @@ Available targets:
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.3 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 6.35 |
 | <a name="requirement_awscc"></a> [awscc](#requirement\_awscc) | >= 1.40 |
@@ -519,7 +707,7 @@ Available targets:
 ## Providers
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.35 |
 | <a name="provider_awscc"></a> [awscc](#provider\_awscc) | >= 1.40 |
 | <a name="provider_random"></a> [random](#provider\_random) | n/a |
@@ -527,14 +715,14 @@ Available targets:
 ## Modules
 
 | Name | Source | Version |
-|------|--------|---------|
+| ---- | ------ | ------- |
 | <a name="module_ssm_bucket"></a> [ssm\_bucket](#module\_ssm\_bucket) | terraform-aws-modules/s3-bucket/aws | ~> 5.10 |
 | <a name="module_tags"></a> [tags](#module\_tags) | cloudopsworks/tags/local | 1.0.10 |
 
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [aws_cloudwatch_log_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_iam_role.default_host_management](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy.default_host_management_session_logging](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
@@ -550,6 +738,9 @@ Available targets:
 | [aws_ssm_document.session_manager](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_document) | resource |
 | [aws_ssm_resource_data_sync.inventory](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_resource_data_sync) | resource |
 | [aws_ssm_service_setting.default_host_management](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_service_setting) | resource |
+| [aws_ssmquicksetup_configuration_manager.dhmc](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
+| [aws_ssmquicksetup_configuration_manager.host](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
+| [aws_ssmquicksetup_configuration_manager.patch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [awscc_ssmguiconnect_preferences.remote_desktop](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmguiconnect_preferences) | resource |
 | [random_string.random](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
@@ -559,11 +750,12 @@ Available targets:
 | [aws_kms_key.existing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_key) | data source |
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
+| [aws_ssm_patch_baselines.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_patch_baselines) | data source |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_extra_tags"></a> [extra\_tags](#input\_extra\_tags) | Extra tags to add to the resources | `map(string)` | `{}` | no |
 | <a name="input_is_hub"></a> [is\_hub](#input\_is\_hub) | Is this a hub or spoke configuration? | `bool` | `false` | no |
 | <a name="input_org"></a> [org](#input\_org) | Organization details | <pre>object({<br/>    organization_name = string<br/>    organization_unit = string<br/>    environment_type  = string<br/>    environment_name  = string<br/>  })</pre> | n/a | yes |
@@ -573,7 +765,7 @@ Available targets:
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_allowed_iam_role_arns"></a> [allowed\_iam\_role\_arns](#output\_allowed\_iam\_role\_arns) | Resolved list of IAM role ARNs granted access to the audit bucket and KMS key, merging settings.allowed\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.allowed\_iam\_role\_names. |
 | <a name="output_audit_bucket_arn"></a> [audit\_bucket\_arn](#output\_audit\_bucket\_arn) | ARN of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
 | <a name="output_audit_bucket_id"></a> [audit\_bucket\_id](#output\_audit\_bucket\_id) | Name of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
@@ -584,11 +776,15 @@ Available targets:
 | <a name="output_default_host_management_role_name"></a> [default\_host\_management\_role\_name](#output\_default\_host\_management\_role\_name) | Name of the IAM role Systems Manager assumes for Default Host Management Configuration. Empty when the module does not create the role. |
 | <a name="output_default_host_management_setting_value"></a> [default\_host\_management\_setting\_value](#output\_default\_host\_management\_setting\_value) | Value written to the Default Host Management Configuration service setting, as the role path and name Systems Manager expects. Empty when Default Host Management Configuration is disabled. |
 | <a name="output_delegated_administrator_account_id"></a> [delegated\_administrator\_account\_id](#output\_delegated\_administrator\_account\_id) | Account ID registered as SSM delegated administrator. Empty when delegation mode is disabled. |
+| <a name="output_dhmc_quicksetup_manager_arn"></a> [dhmc\_quicksetup\_manager\_arn](#output\_dhmc\_quicksetup\_manager\_arn) | ARN of the Quick Setup configuration manager deploying Default Host Management Configuration. Empty when settings.dhmc is disabled. |
+| <a name="output_host_management_quicksetup_manager_arn"></a> [host\_management\_quicksetup\_manager\_arn](#output\_host\_management\_quicksetup\_manager\_arn) | ARN of the Quick Setup configuration manager deploying Host Management. Empty when settings.host\_management is disabled. |
 | <a name="output_inventory_association_id"></a> [inventory\_association\_id](#output\_inventory\_association\_id) | ID of the State Manager association running AWS-GatherSoftwareInventory. Empty when Inventory collection is disabled. |
 | <a name="output_inventory_association_name"></a> [inventory\_association\_name](#output\_inventory\_association\_name) | Name of the State Manager association running AWS-GatherSoftwareInventory. Empty when Inventory collection is disabled. |
 | <a name="output_kms_key_alias"></a> [kms\_key\_alias](#output\_kms\_key\_alias) | Alias of the KMS key created by this module. Empty when the module does not create a key. |
 | <a name="output_kms_key_arn"></a> [kms\_key\_arn](#output\_kms\_key\_arn) | ARN of the KMS key used to encrypt session data. Empty when no customer managed key is in use. |
 | <a name="output_kms_key_id"></a> [kms\_key\_id](#output\_kms\_key\_id) | Key ID of the KMS key used to encrypt session data, whether created by this module or supplied. Empty when no customer managed key is in use. |
+| <a name="output_patch_policy_name"></a> [patch\_policy\_name](#output\_patch\_policy\_name) | Name of the patch policy, which Quick Setup also applies to targeted instances as a tag. Empty when settings.patch is disabled. |
+| <a name="output_patch_quicksetup_manager_arn"></a> [patch\_quicksetup\_manager\_arn](#output\_patch\_quicksetup\_manager\_arn) | ARN of the Quick Setup configuration manager deploying the Patch Policy. Empty when settings.patch is disabled. |
 | <a name="output_remote_desktop_recording_bucket"></a> [remote\_desktop\_recording\_bucket](#output\_remote\_desktop\_recording\_bucket) | Name of the S3 bucket receiving Fleet Manager Remote Desktop connection recordings. Empty when RDP recording is disabled. |
 | <a name="output_remote_desktop_recording_kms_key_arn"></a> [remote\_desktop\_recording\_kms\_key\_arn](#output\_remote\_desktop\_recording\_kms\_key\_arn) | ARN of the KMS key used to encrypt Remote Desktop recordings while Systems Manager processes them. Empty when RDP recording is disabled. |
 | <a name="output_resource_data_sync_bucket"></a> [resource\_data\_sync\_bucket](#output\_resource\_data\_sync\_bucket) | Name of the S3 bucket receiving synchronised Inventory data. Empty when resource data sync is disabled. |

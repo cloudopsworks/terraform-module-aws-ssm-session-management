@@ -22,6 +22,33 @@ locals {
 
 include "root" {
   path = find_in_parent_folders("{{ .RootFileName }}")
+  # Exposes the root config so the awscc provider below can reuse its region and role.
+  # Terragrunt does not merge an included config's locals into the including config;
+  # expose is the documented way to read them, as include.root.locals.<name>.
+  expose = true
+}
+
+# root.hcl generates the aws provider only. This module also manages Fleet Manager Remote
+# Desktop recording preferences, which AWS exposes solely through Cloud Control, so it
+# needs the awscc provider pointed at the same region and role. Left unconfigured, awscc
+# falls back to its own default credential and region chain and resolves against the wrong
+# region -- which surfaces as "Cannot import non-existent remote object" on import, or as a
+# spurious create for awscc_ssmguiconnect_preferences that then fails with AlreadyExists.
+#
+# awscc is plugin-framework based: assume_role is a nested attribute assigned with "=", not
+# a block as in the aws provider. Copying the aws block verbatim fails to parse.
+generate "provider_awscc" {
+  path      = "provider-awscc.g.tf"
+  if_exists = "overwrite_terragrunt"
+  contents  = <<EOF
+provider "awscc" {
+  region = "${include.root.locals.region}"
+  assume_role = {
+    role_arn     = "${include.root.locals.sts_role_arn}"
+    session_name = "terragrunt"
+  }
+}
+EOF
 }
 
 terraform {

@@ -121,3 +121,23 @@ output "delegated_administrator_account_id" {
   description = "Account ID registered as SSM delegated administrator. Empty when delegation mode is disabled."
   value       = try(aws_organizations_delegated_administrator.this[0].account_id, "")
 }
+
+output "dhmc_quicksetup_manager_arn" {
+  description = "ARN of the Quick Setup configuration manager deploying Default Host Management Configuration. Empty when settings.dhmc is disabled."
+  value       = try(aws_ssmquicksetup_configuration_manager.dhmc[0].manager_arn, "")
+}
+
+output "host_management_quicksetup_manager_arn" {
+  description = "ARN of the Quick Setup configuration manager deploying Host Management. Empty when settings.host_management is disabled."
+  value       = try(aws_ssmquicksetup_configuration_manager.host[0].manager_arn, "")
+}
+
+output "patch_quicksetup_manager_arn" {
+  description = "ARN of the Quick Setup configuration manager deploying the Patch Policy. Empty when settings.patch is disabled."
+  value       = try(aws_ssmquicksetup_configuration_manager.patch[0].manager_arn, "")
+}
+
+output "patch_policy_name" {
+  description = "Name of the patch policy, which Quick Setup also applies to targeted instances as a tag. Empty when settings.patch is disabled."
+  value       = local.patch_quicksetup_enabled ? try(var.settings.patch.policy_name, local.system_name_short) : ""
+}

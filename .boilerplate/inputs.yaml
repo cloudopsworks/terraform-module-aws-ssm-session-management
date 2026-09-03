@@ -95,3 +95,69 @@ settings:
   #     prefix: "inventory"                       # (Optional) Key prefix for the synchronised data. Set to "" to write at the bucket root. Default: "inventory"
   #     region: ""                                # (Optional) Region of the destination bucket. Default: "" (the region this module is applied in)
   #     kms_key_arn: ""                           # (Optional) KMS key ARN used to encrypt the synchronised data. Default: "" (this module's key when the audit bucket is the destination, otherwise the sync sets no key of its own)
+
+  # ---------------------------------------------------------------------------------
+  # SSM Quick Setup configuration managers.
+  #
+  # These three blocks are independent of fleet_manager above: they deploy AWS Systems
+  # Manager Quick Setup configurations rather than individual resources, and each one can
+  # target this account or a set of organizational units. All are ignored in delegation
+  # mode. Organization-wide deployments must be applied from the Quick Setup delegated
+  # administrator account — the account registered through settings.organization.
+  # ---------------------------------------------------------------------------------
+
+  # dhmc:                                         # (Optional) Quick Setup Default Host Management Configuration (AWSQuickSetupType-DHMC). Rolls DHMC out across organizational units, so every EC2 instance in them becomes a managed node without an instance profile.
+  #   enabled: false                              # (Optional) Create the DHMC Quick Setup configuration manager. Default: false
+  #   update_ssm_agent: true                      # (Optional) Update SSM Agent on target instances every two weeks. Default: true
+  #   target_organizational_units: "ou-abcd-1111" # (Required when enabled is true) Comma separated list of organizational unit IDs to deploy to. DHMC has no local-account targeting mode.
+  #   target_regions: "us-east-1"                 # (Optional) Comma separated list of regions to deploy to. Default: "" (the region this module is applied in)
+
+  # host_management:                              # (Optional) Quick Setup Host Management (AWSQuickSetupType-SSMHostMgmt). Configures agent updates, inventory collection, patch scanning and the CloudWatch agent on the targeted instances.
+  #   enabled: false                              # (Optional) Create the Host Management Quick Setup configuration manager. Default: false
+  #   update_ssm_agent: true                      # (Optional) Update SSM Agent on target instances every two weeks. Default: true
+  #   update_ec2_launch_agent: false              # (Optional) Update the EC2 Launch agent monthly. Windows only. Default: false
+  #   collect_inventory: true                     # (Optional) Collect instance metadata every 30 minutes. Do not combine with fleet_manager.inventory — Systems Manager permits only one inventory association per node. Default: true
+  #   scan_instances: true                        # (Optional) Scan target instances daily for missing patches. Default: true
+  #   install_cloudwatch_agent: false             # (Optional) Install the CloudWatch agent on target instances. Default: false
+  #   update_cloudwatch_agent: false              # (Optional) Update the CloudWatch agent monthly. Default: false
+  #   is_policy_attach_allowed: false             # (Optional) Allow Quick Setup to attach policies to instance profiles already associated with the target instances. Default: false
+  #   #
+  #   # Targeting: use EITHER target_type (local account) OR target_organizational_units
+  #   # (organization). Supplying both is rejected.
+  #   target_type: "*"                            # (Optional) How instances are targeted in this account. Values: "*" (every instance), InstanceIds, Tags, ResourceGroups. Leave unset when deploying to OUs. Default: "" (unset)
+  #   target_instances: "i-1234567890abcdef0"     # (Required when target_type is InstanceIds) Comma separated list of instance IDs.
+  #   target_tag_key: "Environment"               # (Required when target_type is Tags) Tag key assigned to the instances to target.
+  #   target_tag_value: "production"              # (Required when target_type is Tags) Value of that tag key.
+  #   resource_group_name: "my-group"             # (Required when target_type is ResourceGroups) Name of the resource group holding the instances to target.
+  #   target_organizational_units: "ou-abcd-1111" # (Optional) Comma separated list of organizational unit IDs to deploy to. Mutually exclusive with target_type. Default: ""
+  #   target_accounts: "123456789012"             # (Optional) Comma separated list of account IDs for a local deployment. Default: ""
+  #   target_regions: "us-east-1"                 # (Optional) Comma separated list of regions to deploy to. Default: "" (the region this module is applied in)
+
+  # patch:                                        # (Optional) Quick Setup Patch Policy (AWSQuickSetupType-PatchPolicy). Quick Setup must already have created the AWS-QuickSetup-PatchPolicy local deployment roles in this account — configure a patch policy once from the console, or let this module create the first one.
+  #   enabled: false                              # (Optional) Create the Patch Policy Quick Setup configuration manager. Default: false
+  #   policy_name: ""                             # (Optional) Name of the patch policy, also applied to target instances as a tag. Default: "" (the short system name)
+  #   operation: "Scan"                           # (Optional) Whether instances only scan for patches, or scan and install them. Values: Scan, ScanAndInstall. Default: "Scan"
+  #   scan_value: "cron(0 1 * * ? *)"             # (Optional) Cron expression scheduling the patch scan. Default: "cron(0 1 * * ? *)"
+  #   scan_next_interval: false                   # (Optional) Scan at the next cron interval instead of waiting a full cycle. Default: false
+  #   install_value: "cron(0 2 * * ? *)"          # (Optional) Cron expression scheduling the patch install. Only sent when operation is ScanAndInstall. Default: "" (falls back to scan_value)
+  #   install_next_interval: false                # (Optional) Install at the next cron interval. Only sent when operation is ScanAndInstall. Default: false
+  #   reboot_option: "RebootIfNeeded"             # (Optional) Whether instances reboot after patches install. Values: RebootIfNeeded, NoReboot. Default: "" (unset, AWS decides)
+  #   default_baselines: true                     # (Optional) Restrict the patch baseline lookup to AWS default baselines. Default: true
+  #   baseline_use: "default"                     # (Optional) Whether the selected baselines are all AWS provided. Values: default, custom. Default: "default"
+  #   baseline_region: "us-east-1"                # (Optional) Region where the patch baselines exist. Default: "" (the region this module is applied in)
+  #   rate_control_concurrency: "10%"             # (Optional) Instances patched at once, as a number or a percentage. Default: "10%"
+  #   rate_control_error_threshold: "2%"          # (Optional) Errors tolerated before the deployment stops, as a number or a percentage. Default: "2%"
+  #   is_policy_attach_allowed: false             # (Optional) Allow Quick Setup to attach policies to instance profiles already associated with the target instances. Default: false
+  #   output_s3_bucket_name: ""                   # (Optional) Bucket receiving patch command output logs. Output logging is enabled only when this is set. This module neither creates that bucket nor grants access to it. Default: "" (logging disabled)
+  #   output_s3_bucket_region: ""                 # (Optional) Region of that bucket. Default: "" (the region this module is applied in)
+  #   output_s3_key_prefix: ""                    # (Optional) Key prefix used within that bucket. Default: ""
+  #   #
+  #   # Targeting behaves exactly as documented under host_management above.
+  #   target_type: "*"                            # (Optional) How instances are targeted in this account. Values: "*", InstanceIds, Tags, ResourceGroups. Leave unset when deploying to OUs. Default: "" (unset)
+  #   target_instances: "i-1234567890abcdef0"     # (Required when target_type is InstanceIds) Comma separated list of instance IDs.
+  #   target_tag_key: "Environment"               # (Required when target_type is Tags) Tag key assigned to the instances to target.
+  #   target_tag_value: "production"              # (Required when target_type is Tags) Value of that tag key.
+  #   resource_group_name: "my-group"             # (Required when target_type is ResourceGroups) Name of the resource group holding the instances to target.
+  #   target_organizational_units: "ou-abcd-1111" # (Optional) Comma separated list of organizational unit IDs to deploy to. Mutually exclusive with target_type. Default: ""
+  #   target_accounts: "123456789012"             # (Optional) Comma separated list of account IDs for a local deployment. Default: ""
+  #   target_regions: "us-east-1"                 # (Optional) Comma separated list of regions to deploy to. Default: "" (the region this module is applied in)
