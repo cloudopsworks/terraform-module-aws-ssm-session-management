@@ -87,9 +87,11 @@ locals {
       }
       Action   = "s3:PutObject"
       Resource = local.resource_data_sync_object_pattern
+      # No s3:x-amz-acl condition: ACLs are disabled on this bucket, and AWS documents that
+      # requiring the canned ACL denies callers that correctly omit it. aws:SourceAccount
+      # and aws:SourceArn remain the real constraints.
       Condition = {
         StringEquals = {
-          "s3:x-amz-acl"      = "bucket-owner-full-control"
           "aws:SourceAccount" = data.aws_caller_identity.current.account_id
         }
         ArnLike = {
@@ -137,7 +139,6 @@ module "ssm_bucket" {
   version                               = "~> 5.10"
   create_bucket                         = !local.is_delegated
   bucket                                = local.ssm_logs_bucket
-  acl                                   = "private"
   block_public_acls                     = true
   block_public_policy                   = true
   ignore_public_acls                    = true
@@ -150,8 +151,20 @@ module "ssm_bucket" {
     Version   = "2012-10-17"
     Statement = local.bucket_policy_statements
   }) : null
+
+  # BucketOwnerEnforced, not BucketOwnerPreferred. Under Preferred the bucket owner only
+  # takes ownership of an object when the uploader sets the bucket-owner-full-control ACL,
+  # and Fleet Manager Remote Desktop recordings are uploaded by the GUI Connect service
+  # without one. Those recordings stayed owned by an AWS service account, and a bucket
+  # policy cannot grant access to objects the bucket owner does not own -- so the account
+  # paying for the bucket could never read its own recordings, whatever the policy said.
+  # Enforced disables ACLs outright and makes the bucket owner own every object.
+  #
+  # No "acl" argument here on purpose: the upstream module creates an aws_s3_bucket_acl
+  # whenever acl is non-null, and setting an ACL on an enforced-ownership bucket fails with
+  # AccessControlListNotSupported.
   control_object_ownership = true
-  object_ownership         = "BucketOwnerPreferred"
+  object_ownership         = "BucketOwnerEnforced"
 
   versioning = {
     enabled = try(var.settings.bucket.versioning, false)

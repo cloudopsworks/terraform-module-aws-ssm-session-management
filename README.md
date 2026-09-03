@@ -72,7 +72,9 @@ All of it is opt-in and account and Region wide:
   audit bucket this module already manages and adding the bucket policy and KMS grants the service
   requires.
 
-- **Remote Desktop connection recording** records RDP connections to S3. This is the only separately
+- **Remote Desktop connection recording** records RDP connections to S3. The audit bucket is created with
+  `BucketOwnerEnforced` object ownership so these recordings are owned by the account that owns the
+  bucket — see the caveat below. This is the only separately
   configurable Remote Desktop setting — a connection otherwise applies the same Session Manager
   preferences written to the `SSM-SessionManagerRunShell` document. It requires just-in-time node
   access, which this module cannot enable; see the caveat below.
@@ -714,6 +716,30 @@ settings:
     target_regions: "us-east-1,us-west-2"
     collect_inventory: true
 ```
+
+### Object ownership and Remote Desktop recordings
+
+The audit bucket is created with `ObjectOwnership: BucketOwnerEnforced`, which disables ACLs and makes
+the bucket owner the owner of every object regardless of who uploaded it.
+
+This is not cosmetic. Under the previous `BucketOwnerPreferred` setting, the bucket owner only took
+ownership when the uploader supplied the `bucket-owner-full-control` ACL, and the GUI Connect service
+that uploads Remote Desktop recordings does not supply one. Those recordings ended up owned by an AWS
+service account, and **a bucket policy cannot grant access to objects the bucket owner does not own** —
+object ACLs govern, and only the object owner can change them. The result was a recording that uploaded
+successfully, at full size, that nobody in the account could ever read. No bucket policy grant fixed it,
+including `s3:*` through `settings.admin_iam_role_names`, because S3 denied the request at authorization
+before it ever reached the object.
+
+Two consequences worth knowing:
+
+- **Ownership is not retroactive.** Recordings written before this change remain owned by the service
+  account and stay unreadable permanently. The bucket owner can delete them, but never read them. Only
+  recordings written after the change are accessible.
+- **ACLs are disabled on the bucket.** Nothing in this module sets one, and the resource data sync grant
+  no longer requires the `bucket-owner-full-control` canned ACL — `aws:SourceAccount` and `aws:SourceArn`
+  remain the constraints on that statement. If you attach your own policy or tooling that sets an object
+  ACL, it will fail with `AccessControlListNotSupported`.
 
 ### Delegation mode
 
