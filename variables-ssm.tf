@@ -11,6 +11,7 @@
 #   random_bucket_suffix: true                      # (Optional) Deprecated, use bucket.random_suffix instead. Default: true
 #   allowed_iam_role_arns: []                       # (Optional) List of IAM role ARNs allowed to access the S3 bucket and KMS key. Default: []
 #   allowed_iam_role_names: []                      # (Optional) List of IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Entries may use "*" and "?" wildcards (e.g. "ssm-*"), which are resolved by listing roles at plan time. Default: []
+#   admin_iam_role_arns: []                         # (Optional) List of IAM role ARNs granted s3:* on the audit bucket, plus the KMS data plane actions that access depends on. Merged with the roles resolved from admin_iam_role_names. Use for roles outside this account, which cannot be resolved by name. Default: []
 #   admin_iam_role_names: []                        # (Optional) List of IAM role names in the current account granted s3:* on the audit bucket, plus the KMS data plane actions that access depends on. Same wildcard support and plan-time resolution as allowed_iam_role_names. Default: []
 #   organization:                                   # (Optional) Organization delegation settings. When delegated is true ONLY the delegated administrator registrations are created.
 #     delegated: false                              # (Optional) Whether to run in delegation mode, registering SSM delegated administrators instead of session logging resources. Default: false

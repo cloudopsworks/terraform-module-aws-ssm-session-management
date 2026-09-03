@@ -61,6 +61,7 @@ locals {
   # Administrative roles are granted s3:* on the audit bucket rather than the write-only
   # pair above, so they are resolved separately and never folded into the list above.
   admin_iam_role_arns = sort(distinct(concat(
+    try(var.settings.admin_iam_role_arns, []),
     [for name in local.requested_admin_iam_role_names : data.aws_iam_role.allowed[name].arn if !can(regex("[*?]", name))],
     flatten([for name in local.requested_admin_iam_role_names : tolist(data.aws_iam_roles.allowed_wildcard[name].arns) if can(regex("[*?]", name))]),
   )))

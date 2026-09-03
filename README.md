@@ -54,7 +54,9 @@ log group, and the KMS key protecting both. Access to those audit logs is grante
 `settings.allowed_iam_role_names` (or `allowed_iam_role_arns`) grants the write-only pair that the
 instance roles writing session logs need, while `settings.admin_iam_role_names` grants `s3:*` on the
 bucket for roles that have to read, list or clean up the logs. Both name lists accept exact names and
-`*` / `?` wildcards, resolved at plan time.
+`*` / `?` wildcards, resolved at plan time, and each has an ARN counterpart —
+`settings.allowed_iam_role_arns` and `settings.admin_iam_role_arns` — for roles outside this account that
+cannot be looked up by name.
 
 Under `settings.fleet_manager` the module also configures the Fleet Manager side of Systems Manager.
 All of it is opt-in and account and Region wide:
@@ -155,6 +157,7 @@ settings:
   # random_bucket_suffix: true                    # (Optional) Deprecated, use bucket.random_suffix instead. Default: true
   # allowed_iam_role_arns: []                     # (Optional) IAM role ARNs allowed to write to the audit bucket and use the KMS key. Default: []
   # allowed_iam_role_names: []                    # (Optional) IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Supports "*" and "?" wildcards, e.g. "ssm-*" or "*-instance-role". Resolved by listing roles at plan time, so a role created later that matches an existing pattern is picked up on the next plan. Each entry must contain at least one literal character. Default: []
+  # admin_iam_role_arns: []                       # (Optional) IAM role ARNs granted s3:* on the audit bucket, plus the KMS data plane actions that access depends on. Merged with whatever admin_iam_role_names resolves to. Use for cross-account roles, which cannot be looked up by name. Default: []
   # admin_iam_role_names: []                      # (Optional) IAM role names in the current account granted s3:* on the audit bucket, plus the KMS Encrypt/Decrypt/GenerateDataKey actions that access depends on (the bucket is SSE-KMS, so s3:* alone cannot read an object body). Same "*"/"?" wildcard support and plan-time resolution as allowed_iam_role_names, and each entry must contain at least one literal character. Use for break-glass or audit-review roles, not for the instance roles that write session logs. Default: []
 
   # organization:                                 # (Optional) Delegation mode. When delegated is true ONLY the delegated administrator registrations are created — no bucket, key, log group or session document.
@@ -628,7 +631,13 @@ settings:
   admin_iam_role_names:
     - "SecurityAudit"
     - "breakglass-*"
+  admin_iam_role_arns:
+    - "arn:aws:iam::123456789012:role/central-audit-reader"
 ```
+
+`admin_iam_role_arns` is merged with whatever `admin_iam_role_names` resolves to, exactly as
+`allowed_iam_role_arns` is merged into the write tier. Use it for roles in another account, which cannot
+be resolved by name from here.
 
 Because the bucket is SSE-KMS encrypted, `s3:*` on its own cannot read an object body or write a new one,
 so these roles are also added to the KMS key policy with the same data plane actions the write roles get:
@@ -802,7 +811,7 @@ Available targets:
 
 | Name | Description |
 | ---- | ----------- |
-| <a name="output_admin_iam_role_arns"></a> [admin\_iam\_role\_arns](#output\_admin\_iam\_role\_arns) | Resolved list of IAM role ARNs granted s3:* on the audit bucket, from the exact names and wildcard patterns in settings.admin\_iam\_role\_names. |
+| <a name="output_admin_iam_role_arns"></a> [admin\_iam\_role\_arns](#output\_admin\_iam\_role\_arns) | Resolved list of IAM role ARNs granted s3:* on the audit bucket, merging settings.admin\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.admin\_iam\_role\_names. |
 | <a name="output_allowed_iam_role_arns"></a> [allowed\_iam\_role\_arns](#output\_allowed\_iam\_role\_arns) | Resolved list of IAM role ARNs granted access to the audit bucket and KMS key, merging settings.allowed\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.allowed\_iam\_role\_names. |
 | <a name="output_audit_bucket_arn"></a> [audit\_bucket\_arn](#output\_audit\_bucket\_arn) | ARN of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
 | <a name="output_audit_bucket_id"></a> [audit\_bucket\_id](#output\_audit\_bucket\_id) | Name of the S3 bucket holding Session Manager audit logs. Empty in delegation mode. |
