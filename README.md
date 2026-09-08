@@ -54,9 +54,13 @@ log group, and the KMS key protecting both. Access to those audit logs is grante
 `settings.allowed_iam_role_names` (or `allowed_iam_role_arns`) grants the write-only pair that the
 instance roles writing session logs need, while `settings.admin_iam_role_names` grants full object
 access — read, create, delete, multipart and listing — for roles that have to review or clean up the
-logs. Both name lists accept exact names and
+logs. A third list, `settings.create_grant_iam_role_names`, touches only the KMS key: it grants
+`kms:CreateGrant` to the roles that need to hand the key
+to another AWS service on their behalf, such as an operator starting a recorded Remote Desktop
+connection. All three name lists accept exact names and
 `*` / `?` wildcards, resolved at plan time, and each has an ARN counterpart —
-`settings.allowed_iam_role_arns` and `settings.admin_iam_role_arns` — for roles outside this account that
+`settings.allowed_iam_role_arns`, `settings.admin_iam_role_arns` and
+`settings.create_grant_iam_role_arns` — for roles outside this account that
 cannot be looked up by name.
 
 Under `settings.fleet_manager` the module also configures the Fleet Manager side of Systems Manager.
@@ -162,6 +166,8 @@ settings:
   # allowed_iam_role_names: []                    # (Optional) IAM role names in the current account, resolved to ARNs and merged with allowed_iam_role_arns. Supports "*" and "?" wildcards, e.g. "ssm-*" or "*-instance-role". Resolved by listing roles at plan time, so a role created later that matches an existing pattern is picked up on the next plan. Each entry must contain at least one literal character. Default: []
   # admin_iam_role_arns: []                       # (Optional) IAM role ARNs granted full object access on the audit bucket (read, create, delete, multipart, listing and encryption discovery), plus the KMS data plane actions that access depends on. Merged with whatever admin_iam_role_names resolves to. Use for cross-account roles, which cannot be looked up by name. Default: []
   # admin_iam_role_names: []                      # (Optional) IAM role names in the current account granted full object access on the audit bucket -- GetObject, PutObject, DeleteObject, their versioned and multipart counterparts, ListBucket and GetEncryptionConfiguration -- plus the KMS Encrypt/Decrypt/GenerateDataKey actions that access depends on (the bucket is SSE-KMS, so S3 actions alone cannot read an object body). Not s3:*, which would also permit rewriting the bucket policy or deleting the bucket. Same "*"/"?" wildcard support and plan-time resolution as allowed_iam_role_names, and each entry must contain at least one literal character. Use for break-glass or audit-review roles, not for the instance roles that write session logs. Default: []
+  # create_grant_iam_role_arns: []                # (Optional) IAM role ARNs granted kms:CreateGrant on the module KMS key. Grants no S3 access at all. Merged with whatever create_grant_iam_role_names resolves to. Use for cross-account roles, which cannot be looked up by name. Default: []
+  # create_grant_iam_role_names: []               # (Optional) IAM role names in the current account granted kms:CreateGrant on the module KMS key, for features that hand the key to another AWS service on the caller's behalf -- Just-in-Time node access and RDP recording. Key policy only: these roles get no access to the audit bucket. Supports "*" and "?" wildcards and is resolved by listing roles at plan time, exactly as allowed_iam_role_names. Each entry must contain at least one literal character. Default: []
 
   # organization:                                 # (Optional) Delegation mode. When delegated is true ONLY the delegated administrator registrations are created — no bucket, key, log group or session document.
   #   delegated: false                            # (Optional) Run in delegation mode. Must be applied against the Organizations management account. Default: false
@@ -390,7 +396,8 @@ inputs = {
    To roll the same adoption out across organizational units, use `settings.dhmc` instead, and add
    `settings.host_management` or `settings.patch` for agent updates, inventory and patching.
    Roles that need to read or clean up the logs rather than write them go under
-   `settings.admin_iam_role_names`.
+   `settings.admin_iam_role_names`, and roles that start Just-in-Time or recorded Remote Desktop
+   connections go under `settings.create_grant_iam_role_names`.
 4. Run `terragrunt plan` to review the resources to be created.
 5. Run `terragrunt apply` to deploy the configuration.
 
@@ -458,16 +465,17 @@ Two behaviours to be aware of when using wildcards:
   so a role created later that matches an existing pattern is added to the bucket and KMS key policies
   on the next apply, with no change to this configuration. Exact names do not behave this way.
 - **A pattern that matches nothing is silent.** A misspelled exact name fails the plan; a misspelled
-  pattern simply grants no access. Check the `allowed_iam_role_arns` and `admin_iam_role_arns` outputs to
-  see what actually resolved.
+  pattern simply grants no access. Check the `allowed_iam_role_arns`, `admin_iam_role_arns` and
+  `create_grant_iam_role_arns` outputs to see what actually resolved.
 
 Wildcards require `iam:ListRoles` in addition to the `iam:GetRole` needed for exact names. A pattern
 made up only of wildcards is rejected, since it would match every role in the account.
 
-Every rule in this section applies identically to `settings.admin_iam_role_names`, which is resolved
-through the same lookups — a name appearing in both lists is only queried once. The difference is the
-grant each list produces, covered under *Granting administrative roles full access to the audit bucket*
-below.
+Every rule in this section applies identically to `settings.admin_iam_role_names` and
+`settings.create_grant_iam_role_names`, which are resolved through the same lookups — a name appearing
+in more than one list is only queried once. The difference is the grant each list produces, covered
+under *Granting administrative roles full access to the audit bucket* and
+*Granting kms:CreateGrant to specific roles* below.
 
 ### Reusing an existing KMS key
 
@@ -616,8 +624,10 @@ Three things to know:
   your own lifecycle policy.
 - **Operators need their own permissions.** Configuring recording requires
   `ssm-guiconnect:UpdateConnectionRecordingPreferences` and `kms:CreateGrant`; connecting requires
-  `ssm-guiconnect:StartConnection` and `kms:CreateGrant` on the recording key. This module grants
-  neither — they belong to the human or role making the connection. The module does tag the KMS key it
+  `ssm-guiconnect:StartConnection` and `kms:CreateGrant` on the recording key. `kms:CreateGrant` can be
+  granted through `settings.create_grant_iam_role_names` (see *Granting kms:CreateGrant to specific
+  roles* below); `ssm-guiconnect:StartConnection` belongs to the operator's own identity policy and is
+  not granted here. The module does tag the KMS key it
   creates with `SystemsManagerJustInTimeNodeAccessManaged=true`, which AWS requires before an operator
   can be granted `kms:CreateGrant` on it. Supply that tag yourself if you bring your own key.
 
@@ -670,6 +680,45 @@ identity policy rather than widening this statement for every admin principal.
 
 An entry made only of wildcards is rejected — `"*"` would hand every role in the account full access to
 the audit logs.
+
+### Granting kms:CreateGrant to specific roles
+
+Some Systems Manager features do not use the KMS key directly. They ask another AWS service to use it
+on the caller's behalf, and AWS implements that hand-off as a *grant* — so the caller needs
+`kms:CreateGrant` on the key. Just-in-Time node access and Remote Desktop session recording both work
+this way: an operator with every S3 and KMS data plane action still cannot start a recorded connection
+without it.
+
+`settings.create_grant_iam_role_names` grants exactly that one action, and nothing else:
+
+```yaml
+settings:
+  create_grant_iam_role_names:
+    - "rdp-operator-*"
+    - "JustInTimeNodeAccessOperator"
+  create_grant_iam_role_arns:
+    - "arn:aws:iam::123456789012:role/central-jit-operator"
+```
+
+This list is **key policy only**. It grants no access to the audit bucket and none of the
+`kms:Encrypt` / `kms:Decrypt` / `kms:GenerateDataKey*` actions the other two tiers get. A role that also
+has to read the recordings it produced belongs in `settings.admin_iam_role_names` as well — the lists
+are independent, and listing a role in both is the supported way to give it both grants.
+
+Grant *management* is deliberately not included: `kms:ListGrants` and `kms:RevokeGrant` are not granted,
+so a role here can create a grant but cannot enumerate or revoke the grants on the key. That is the
+right shape for the service hand-off this exists for, since the AWS service retires its own grant when
+the connection ends. Add those actions through the role's own identity policy if you need an operator
+to audit or clean up grants by hand.
+
+It is kept separate from the write and admin tiers on purpose. `kms:CreateGrant` is the one data plane
+action that widens *who else* may use the key: a role holding it can delegate key use to another
+principal without touching the key policy. Every instance role writing session logs would otherwise
+inherit that, which is not what the write tier is for.
+
+`kms:*` is still never granted, so these roles cannot rewrite the key policy or schedule the key for
+deletion. The same wildcard rules as the other lists apply, and an entry made only of wildcards is
+rejected.
 
 ### Quick Setup host management and patch scanning for the whole account
 
@@ -800,9 +849,9 @@ Available targets:
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.35 |
-| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | >= 1.40 |
-| <a name="provider_random"></a> [random](#provider\_random) | n/a |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.62.0 |
+| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | 1.100.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 
 ## Modules
 
@@ -865,6 +914,7 @@ Available targets:
 | <a name="output_audit_bucket_key_prefix"></a> [audit\_bucket\_key\_prefix](#output\_audit\_bucket\_key\_prefix) | Key prefix under which Session Manager writes audit logs in the bucket. |
 | <a name="output_cloudwatch_log_group_arn"></a> [cloudwatch\_log\_group\_arn](#output\_cloudwatch\_log\_group\_arn) | ARN of the CloudWatch log group receiving session logs. Empty when CloudWatch logging is disabled. |
 | <a name="output_cloudwatch_log_group_name"></a> [cloudwatch\_log\_group\_name](#output\_cloudwatch\_log\_group\_name) | Name of the CloudWatch log group receiving session logs. Empty when CloudWatch logging is disabled. |
+| <a name="output_create_grant_iam_role_arns"></a> [create\_grant\_iam\_role\_arns](#output\_create\_grant\_iam\_role\_arns) | Resolved list of IAM role ARNs granted kms:CreateGrant on the module KMS key, merging settings.create\_grant\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.create\_grant\_iam\_role\_names. |
 | <a name="output_default_host_management_role_arn"></a> [default\_host\_management\_role\_arn](#output\_default\_host\_management\_role\_arn) | ARN of the IAM role Systems Manager assumes for Default Host Management Configuration. Empty when the module does not create the role. |
 | <a name="output_default_host_management_role_name"></a> [default\_host\_management\_role\_name](#output\_default\_host\_management\_role\_name) | Name of the IAM role Systems Manager assumes for Default Host Management Configuration. Empty when the module does not create the role. |
 | <a name="output_default_host_management_setting_value"></a> [default\_host\_management\_setting\_value](#output\_default\_host\_management\_setting\_value) | Value written to the Default Host Management Configuration service setting, as the role path and name Systems Manager expects. Empty when Default Host Management Configuration is disabled. |

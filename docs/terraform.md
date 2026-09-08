@@ -10,9 +10,9 @@
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.35 |
-| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | >= 1.40 |
-| <a name="provider_random"></a> [random](#provider\_random) | n/a |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.62.0 |
+| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | 1.100.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 
 ## Modules
 
@@ -75,6 +75,7 @@
 | <a name="output_audit_bucket_key_prefix"></a> [audit\_bucket\_key\_prefix](#output\_audit\_bucket\_key\_prefix) | Key prefix under which Session Manager writes audit logs in the bucket. |
 | <a name="output_cloudwatch_log_group_arn"></a> [cloudwatch\_log\_group\_arn](#output\_cloudwatch\_log\_group\_arn) | ARN of the CloudWatch log group receiving session logs. Empty when CloudWatch logging is disabled. |
 | <a name="output_cloudwatch_log_group_name"></a> [cloudwatch\_log\_group\_name](#output\_cloudwatch\_log\_group\_name) | Name of the CloudWatch log group receiving session logs. Empty when CloudWatch logging is disabled. |
+| <a name="output_create_grant_iam_role_arns"></a> [create\_grant\_iam\_role\_arns](#output\_create\_grant\_iam\_role\_arns) | Resolved list of IAM role ARNs granted kms:CreateGrant on the module KMS key, merging settings.create\_grant\_iam\_role\_arns with the exact names and wildcard patterns resolved from settings.create\_grant\_iam\_role\_names. |
 | <a name="output_default_host_management_role_arn"></a> [default\_host\_management\_role\_arn](#output\_default\_host\_management\_role\_arn) | ARN of the IAM role Systems Manager assumes for Default Host Management Configuration. Empty when the module does not create the role. |
 | <a name="output_default_host_management_role_name"></a> [default\_host\_management\_role\_name](#output\_default\_host\_management\_role\_name) | Name of the IAM role Systems Manager assumes for Default Host Management Configuration. Empty when the module does not create the role. |
 | <a name="output_default_host_management_setting_value"></a> [default\_host\_management\_setting\_value](#output\_default\_host\_management\_setting\_value) | Value written to the Default Host Management Configuration service setting, as the role path and name Systems Manager expects. Empty when Default Host Management Configuration is disabled. |

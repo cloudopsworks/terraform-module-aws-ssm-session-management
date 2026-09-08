@@ -157,6 +157,21 @@ resource "aws_kms_key" "this" {
           "kms:Describe*"
         ]
         Resource = "*"
+      }] : [],
+      # Features that hand the key to another AWS service on the caller's behalf -- Just-in-Time
+      # node access and RDP recording among them -- need the caller to be able to create a grant.
+      # It is deliberately a separate list: kms:CreateGrant is the one data plane action that
+      # widens who else may use the key, so it is not folded into the write or admin tiers.
+      local.has_create_grant_iam_roles ? [{
+        Sid    = "AllowIAMRolesCreateGrant"
+        Effect = "Allow"
+        Principal = {
+          AWS = local.create_grant_iam_role_arns
+        }
+        Action = [
+          "kms:CreateGrant",
+        ]
+        Resource = "*"
       }] : []
     )
   })

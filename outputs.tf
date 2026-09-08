@@ -72,6 +72,11 @@ output "admin_iam_role_arns" {
   value       = local.admin_iam_role_arns
 }
 
+output "create_grant_iam_role_arns" {
+  description = "Resolved list of IAM role ARNs granted kms:CreateGrant on the module KMS key, merging settings.create_grant_iam_role_arns with the exact names and wildcard patterns resolved from settings.create_grant_iam_role_names."
+  value       = local.create_grant_iam_role_arns
+}
+
 output "default_host_management_role_name" {
   description = "Name of the IAM role Systems Manager assumes for Default Host Management Configuration. Empty when the module does not create the role."
   value       = try(aws_iam_role.default_host_management[0].name, "")
