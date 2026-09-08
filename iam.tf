@@ -12,12 +12,17 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
-  requested_iam_role_names       = try(var.settings.allowed_iam_role_names, [])
-  requested_admin_iam_role_names = try(var.settings.admin_iam_role_names, [])
+  requested_iam_role_names              = try(var.settings.allowed_iam_role_names, [])
+  requested_admin_iam_role_names        = try(var.settings.admin_iam_role_names, [])
+  requested_create_grant_iam_role_names = try(var.settings.create_grant_iam_role_names, [])
 
-  # Both lists resolve through the same lookups, so a name appearing in each is only
-  # queried once and the data source keys stay stable regardless of which list it came from.
-  all_requested_iam_role_names = distinct(concat(local.requested_iam_role_names, local.requested_admin_iam_role_names))
+  # All three lists resolve through the same lookups, so a name appearing in more than one is
+  # only queried once and the data source keys stay stable regardless of which list it came from.
+  all_requested_iam_role_names = distinct(concat(
+    local.requested_iam_role_names,
+    local.requested_admin_iam_role_names,
+    local.requested_create_grant_iam_role_names,
+  ))
 
   # IAM role names are limited to [A-Za-z0-9_+=,.@-], so neither "*" nor "?" can occur in
   # a real name. Their presence therefore marks an entry as a wildcard pattern with no
@@ -66,6 +71,15 @@ locals {
     flatten([for name in local.requested_admin_iam_role_names : tolist(data.aws_iam_roles.allowed_wildcard[name].arns) if can(regex("[*?]", name))]),
   )))
 
-  has_allowed_iam_roles = length(local.allowed_iam_role_arns) > 0
-  has_admin_iam_roles   = length(local.admin_iam_role_arns) > 0
+  # kms:CreateGrant is a key policy grant only -- these roles are never added to the bucket
+  # policy, so the list is resolved on its own and never merged into either list above.
+  create_grant_iam_role_arns = sort(distinct(concat(
+    try(var.settings.create_grant_iam_role_arns, []),
+    [for name in local.requested_create_grant_iam_role_names : data.aws_iam_role.allowed[name].arn if !can(regex("[*?]", name))],
+    flatten([for name in local.requested_create_grant_iam_role_names : tolist(data.aws_iam_roles.allowed_wildcard[name].arns) if can(regex("[*?]", name))]),
+  )))
+
+  has_allowed_iam_roles      = length(local.allowed_iam_role_arns) > 0
+  has_admin_iam_roles        = length(local.admin_iam_role_arns) > 0
+  has_create_grant_iam_roles = length(local.create_grant_iam_role_arns) > 0
 }
