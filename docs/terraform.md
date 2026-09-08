@@ -10,9 +10,9 @@
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.62.0 |
-| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | 1.100.0 |
-| <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.35 |
+| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | >= 1.40 |
+| <a name="provider_random"></a> [random](#provider\_random) | n/a |
 
 ## Modules
 
