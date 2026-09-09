@@ -79,7 +79,6 @@
 #     remote_desktop:                               # (Optional) Fleet Manager Remote Desktop. Connections otherwise inherit the Session Manager preferences above; recording is the only separately configurable setting.
 #       recording:                                  # (Optional) RDP connection recording, written to S3 by the ssm-guiconnect service principal. Console equivalent: Settings, Just-in-time node access, RDP recording.
 #         enabled: false                            # (Optional) Whether to record RDP connections. Requires a customer managed KMS key AND just-in-time node access, which this module sets up. Default: false
-#         just_in_time_node_access_enabled: false   # (Optional) Deprecated, use just_in_time_node_access.enabled instead. Default: false
 #         bucket_name: ""                           # (Optional) Destination bucket. When empty this module's audit bucket is used and the required bucket policy and KMS grants are added automatically; when set, that bucket's policy is the caller's responsibility. Default: ""
 #         bucket_owner: ""                          # (Optional) Account ID owning the destination bucket. Default: "" (the current account)
 #         kms_key_arn: ""                           # (Optional) Symmetric encrypt/decrypt customer managed key used to encrypt the recording while Systems Manager processes it, in the same region as the node. Default: "" (this module's key)
@@ -244,7 +243,7 @@ variable "settings" {
   # JIT node access up as well. That is account and organization wide, so it is acknowledged
   # explicitly rather than acquired as a side effect of asking for recording.
   validation {
-    condition = !try(var.settings.fleet_manager.remote_desktop.recording.enabled, false) || try(var.settings.fleet_manager.remote_desktop.recording.just_in_time_node_access.enabled, var.settings.fleet_manager.remote_desktop.recording.just_in_time_node_access_enabled, false)
+    condition = !try(var.settings.fleet_manager.remote_desktop.recording.enabled, false) || try(var.settings.fleet_manager.remote_desktop.recording.just_in_time_node_access.enabled, false)
     error_message = join("", [
       "settings.fleet_manager.remote_desktop.recording requires just-in-time node access, which this module sets up alongside it as a Quick Setup configuration manager of type AWSQuickSetupType-JITNA plus the deployment roles it needs. ",
       "That reaches the whole organizational unit list you target and is billed after a 30 day trial, so set settings.fleet_manager.remote_desktop.recording.just_in_time_node_access.enabled to true to acknowledge it. ",
