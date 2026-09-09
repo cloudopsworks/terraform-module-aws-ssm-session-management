@@ -28,9 +28,10 @@
 # exposed via Cloud Control. The two deployment roles are ordinary IAM and are created with
 # the aws provider, matching how every other role in this module is managed.
 #
-# The setup runs at one of two scopes, selected by organization_level: across organizational
-# units, which is the default and must be applied from the Systems Manager delegated
-# administrator account, or for the single account this module is applied in.
+# The setup runs at one of two scopes, selected by organization_level: for the single account
+# this module is applied in, which is the default and matches how the rest of this module is
+# scoped, or across organizational units, which must be applied from the Systems Manager
+# delegated administrator account.
 #
 # PREREQUISITE this module does not create: the unified Systems Manager console
 # (AWSQuickSetupType-SSM) must already be set up, covering at least the Regions targeted here
@@ -61,14 +62,14 @@ locals {
   # applied in. The two take different Quick Setup target parameters, and AWS only lets the
   # local deployment roles be omitted for the organizational one, so the mode is explicit
   # rather than inferred from which target happens to be filled in.
-  jit_organization_level = try(local.jit_node_access.organization_level, true)
+  jit_organization_level = try(local.jit_node_access.organization_level, false)
 
-  # Comma separated OU IDs. Required for an organization level setup and has no defensible
-  # default; the precondition below rejects an empty one.
+  # Comma separated OU IDs. Required once organization_level is turned on, and has no
+  # defensible default; the precondition below rejects an empty one.
   jit_target_organizational_units = try(local.jit_node_access.target_organizational_units, "")
 
-  # Comma separated account IDs for a single account setup. Defaults to the account this
-  # module is applied in, which is the whole point of the mode.
+  # Comma separated account IDs for the default single account setup. Defaults to the account
+  # this module is applied in, which is the whole point of the mode.
   jit_target_accounts = try(local.jit_node_access.target_accounts, "") != "" ? local.jit_node_access.target_accounts : data.aws_caller_identity.current.account_id
 
   # Quick Setup rejects the target parameters that do not belong to the selected mode, so

@@ -250,7 +250,7 @@ settings:
   #       kms_key_arn: ""                       # (Optional) Symmetric encrypt/decrypt customer managed key used to encrypt the recording while Systems Manager processes it. Default: "" (this module's key)
   #
   #       just_in_time_node_access:             # (Optional) Just-in-time node access setup, created only while recording is enabled. Deployed with the awscc provider as a Quick Setup configuration manager of type AWSQuickSetupType-JITNA.
-  #         organization_level: true            # (Optional) Set it up across organizational units rather than for this account alone. When true the module must be applied from the Systems Manager delegated administrator account and target_organizational_units is required; when false it targets target_accounts instead. Default: true
+  #         organization_level: false           # (Optional) Set it up across organizational units rather than for this account alone. When true the module must be applied from the Systems Manager delegated administrator account and target_organizational_units is required; when false it targets target_accounts instead. Default: false
   #         target_organizational_units: ""     # (Required when organization_level is true) Comma separated organizational unit IDs, or the organization root ID. Not sent when organization_level is false.
   #         target_accounts: ""                 # (Optional, organization_level false only) Comma separated account IDs. Not sent when organization_level is true. Default: "" (the account this module is applied in)
   #         target_regions: ""                  # (Optional) Comma separated Regions to enable it in. Must match, or be a subset of, the unified console target Regions. Default: "" (the Region this module is applied in)
@@ -601,13 +601,13 @@ settings:
 > a side effect of asking for recording.
 >
 > **Two scopes.** `just_in_time_node_access.organization_level` selects between them and defaults to
-> `true`:
+> `false`, setting just-in-time node access up for the account this module is applied in:
 >
-> | | `organization_level: true` (default) | `organization_level: false` |
+> | | `organization_level: false` (default) | `organization_level: true` |
 > |---|---|---|
-> | Targets | `target_organizational_units` (required) | `target_accounts` (defaults to this account) |
-> | Apply from | the Systems Manager delegated administrator account | the account being set up |
-> | Deployment roles | optional — omitted entirely when `create_deployment_roles: false` | required by AWS, always sent |
+> | Targets | `target_accounts` (defaults to this account) | `target_organizational_units` (required) |
+> | Apply from | the account being set up | the Systems Manager delegated administrator account |
+> | Deployment roles | required by AWS, always sent | optional — omitted entirely when `create_deployment_roles: false` |
 >
 > **What stays yours:** the unified Systems Manager console must already be set up, covering at least
 > the Regions targeted here — JIT node access can only be enabled where the unified console is. If Quick
@@ -630,7 +630,23 @@ settings:
         enabled: true
         just_in_time_node_access_enabled: true   # acknowledges that JIT node access is set up alongside it
         just_in_time_node_access:
-          target_organizational_units: "ou-abcd-11111111"
+          target_regions: "us-east-1"              # defaults to this account; see organization_level below
+```
+
+To set just-in-time node access up across the organization instead, turn `organization_level` on and
+name the organizational units. Apply that from the Systems Manager delegated administrator account:
+
+```yaml
+settings:
+  fleet_manager:
+    enabled: true
+    remote_desktop:
+      recording:
+        enabled: true
+        just_in_time_node_access_enabled: true
+        just_in_time_node_access:
+          organization_level: true
+          target_organizational_units: "ou-abcd-11111111,ou-abcd-22222222"
           target_regions: "us-east-1"
 ```
 
@@ -645,8 +661,6 @@ settings:
       recording:
         enabled: true
         just_in_time_node_access_enabled: true
-        just_in_time_node_access:
-          target_organizational_units: "ou-abcd-11111111"
         bucket_name: "my-central-rdp-recordings"
         bucket_owner: "123456789012"
         kms_key_arn: "arn:aws:kms:us-east-1:123456789012:key/abcd1234-..."
