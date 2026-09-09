@@ -10,9 +10,9 @@
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 6.35 |
-| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | >= 1.40 |
-| <a name="provider_random"></a> [random](#provider\_random) | n/a |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.62.0 |
+| <a name="provider_awscc"></a> [awscc](#provider\_awscc) | 1.100.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | 3.9.0 |
 
 ## Modules
 
@@ -27,9 +27,13 @@
 | ---- | ---- |
 | [aws_cloudwatch_log_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_iam_role.default_host_management](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.jit_node_access_administration](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.jit_node_access_execution](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy.default_host_management_session_logging](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy.jit_node_access_administration](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_iam_role_policy_attachment.default_host_management](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.default_host_management_additional](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_role_policy_attachment.jit_node_access_execution](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_kms_alias.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_alias) | resource |
 | [aws_kms_key.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
 | [aws_organizations_delegated_administrator.cloud_formation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/organizations_delegated_administrator) | resource |
@@ -44,6 +48,7 @@
 | [aws_ssmquicksetup_configuration_manager.host](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [aws_ssmquicksetup_configuration_manager.patch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [awscc_ssmguiconnect_preferences.remote_desktop](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmguiconnect_preferences) | resource |
+| [awscc_ssmquicksetup_configuration_manager.jit_node_access](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [random_string.random](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_iam_role.allowed](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_role) | data source |
@@ -84,6 +89,9 @@
 | <a name="output_host_management_quicksetup_manager_arn"></a> [host\_management\_quicksetup\_manager\_arn](#output\_host\_management\_quicksetup\_manager\_arn) | ARN of the Quick Setup configuration manager deploying Host Management. Empty when settings.host\_management is disabled. |
 | <a name="output_inventory_association_id"></a> [inventory\_association\_id](#output\_inventory\_association\_id) | ID of the State Manager association running AWS-GatherSoftwareInventory. Empty when Inventory collection is disabled. |
 | <a name="output_inventory_association_name"></a> [inventory\_association\_name](#output\_inventory\_association\_name) | Name of the State Manager association running AWS-GatherSoftwareInventory. Empty when Inventory collection is disabled. |
+| <a name="output_jit_node_access_administration_role_arn"></a> [jit\_node\_access\_administration\_role\_arn](#output\_jit\_node\_access\_administration\_role\_arn) | ARN of the Quick Setup local deployment administration role used to deploy just-in-time node access. Empty when RDP recording is disabled. |
+| <a name="output_jit_node_access_execution_role_arn"></a> [jit\_node\_access\_execution\_role\_arn](#output\_jit\_node\_access\_execution\_role\_arn) | ARN of the Quick Setup local deployment execution role used to deploy just-in-time node access. Empty when RDP recording is disabled. |
+| <a name="output_jit_node_access_quicksetup_manager_arn"></a> [jit\_node\_access\_quicksetup\_manager\_arn](#output\_jit\_node\_access\_quicksetup\_manager\_arn) | ARN of the Quick Setup configuration manager enabling just-in-time node access. Empty when RDP recording is disabled. |
 | <a name="output_kms_key_alias"></a> [kms\_key\_alias](#output\_kms\_key\_alias) | Alias of the KMS key created by this module. Empty when the module does not create a key. |
 | <a name="output_kms_key_arn"></a> [kms\_key\_arn](#output\_kms\_key\_arn) | ARN of the KMS key used to encrypt session data. Empty when no customer managed key is in use. |
 | <a name="output_kms_key_id"></a> [kms\_key\_id](#output\_kms\_key\_id) | Key ID of the KMS key used to encrypt session data, whether created by this module or supplied. Empty when no customer managed key is in use. |

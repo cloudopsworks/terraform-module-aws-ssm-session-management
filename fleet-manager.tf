@@ -280,13 +280,15 @@ resource "aws_ssm_resource_data_sync" "inventory" {
 # SSM-SessionManagerRunShell document. Recording is the one thing that is separately
 # configurable, and it is exposed only through Cloud Control, hence the awscc provider.
 #
-# PREREQUISITE: recording is a just-in-time node access feature, not a standalone Fleet
-# Manager one. Just-in-time node access must already be enabled in the account, which is a
-# console-only action performed from the Organizations delegated administrator account and
-# depends on the unified Systems Manager console. No API, CloudFormation resource or
-# Terraform provider can turn it on, so this module cannot satisfy the prerequisite and
-# instead refuses to try unless the caller confirms it is already in place. Without that,
-# Cloud Control fails asynchronously with a 403 "Just-in-time node access is not enabled".
+# Recording is a just-in-time node access feature, not a standalone Fleet Manager one:
+# without JIT node access, Cloud Control fails asynchronously with a 403 "Just-in-time node
+# access is not enabled". Turning recording on therefore also sets JIT node access up, from
+# the Quick Setup AWSQuickSetupType-JITNA configuration type in jit-node-access.tf, together
+# with the deployment roles that configuration type requires.
+#
+# PREREQUISITES that stay the caller's: the unified Systems Manager console must already be
+# set up for the organization, and this module must be applied from the Systems Manager
+# delegated administrator account. JIT node access is billed after a 30 day trial.
 #
 # Recordings are written by the ssm-guiconnect service principal, which is why the audit
 # bucket policy and the KMS key policy both need statements of their own.
@@ -335,8 +337,12 @@ resource "awscc_ssmguiconnect_preferences" "remote_desktop" {
   }
 
   # Recording fails asynchronously with a ProcessingError rather than a clear error at
-  # connection time when the destination policies are not in place yet.
-  depends_on = [module.ssm_bucket]
+  # connection time when the destination policies are not in place yet, and with a 403 when
+  # just-in-time node access has not finished being set up.
+  depends_on = [
+    module.ssm_bucket,
+    awscc_ssmquicksetup_configuration_manager.jit_node_access,
+  ]
 
   lifecycle {
     precondition {
