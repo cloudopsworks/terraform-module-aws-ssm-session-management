@@ -28,10 +28,13 @@
 # exposed via Cloud Control. The two deployment roles are ordinary IAM and are created with
 # the aws provider, matching how every other role in this module is managed.
 #
-# PREREQUISITES this module does not create: the Systems Manager unified console
-# (AWSQuickSetupType-SSM) must already be set up for the organization, and this module must
-# be applied from the Systems Manager delegated administrator account. Both are organization
-# wide concerns, outside the scope of a per-account session logging module.
+# The setup runs at one of two scopes, selected by organization_level: across organizational
+# units, which is the default and must be applied from the Systems Manager delegated
+# administrator account, or for the single account this module is applied in.
+#
+# PREREQUISITE this module does not create: the unified Systems Manager console
+# (AWSQuickSetupType-SSM) must already be set up, covering at least the Regions targeted here
+# -- JIT node access can only be enabled where the unified console is.
 ##
 locals {
   jit_node_access = try(var.settings.fleet_manager.remote_desktop.recording.just_in_time_node_access, {})
@@ -53,9 +56,27 @@ locals {
   # AWS requires these to be the unified console target Regions or a subset of them.
   jit_target_regions = try(local.jit_node_access.target_regions, "") != "" ? local.jit_node_access.target_regions : data.aws_region.current.region
 
-  # Comma separated OU IDs. JIT node access has no local-account targeting mode, so this is
-  # the one parameter with no defensible default; the precondition below rejects an empty one.
+  # Just-in-time node access is set up either across organizational units, deployed from the
+  # Systems Manager delegated administrator account, or for the single account this module is
+  # applied in. The two take different Quick Setup target parameters, and AWS only lets the
+  # local deployment roles be omitted for the organizational one, so the mode is explicit
+  # rather than inferred from which target happens to be filled in.
+  jit_organization_level = try(local.jit_node_access.organization_level, true)
+
+  # Comma separated OU IDs. Required for an organization level setup and has no defensible
+  # default; the precondition below rejects an empty one.
   jit_target_organizational_units = try(local.jit_node_access.target_organizational_units, "")
+
+  # Comma separated account IDs for a single account setup. Defaults to the account this
+  # module is applied in, which is the whole point of the mode.
+  jit_target_accounts = try(local.jit_node_access.target_accounts, "") != "" ? local.jit_node_access.target_accounts : data.aws_caller_identity.current.account_id
+
+  # Quick Setup rejects the target parameters that do not belong to the selected mode, so
+  # only one of the two is ever sent.
+  jit_targets = merge(
+    { "TargetRegions" = local.jit_target_regions },
+    local.jit_organization_level ? { "TargetOrganizationalUnits" = local.jit_target_organizational_units } : { "TargetAccounts" = local.jit_target_accounts },
+  )
 
   # Decides where the approver identity behind an access request is read from: IAM reads the
   # principal starting the session, SSO the IAM Identity Center identity behind it.
@@ -71,6 +92,13 @@ locals {
   jit_execution_role_arn      = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.jit_execution_role_name}"
 
   jit_create_deployment_roles = local.jit_node_access_enabled && try(local.jit_node_access.create_deployment_roles, true)
+
+  # AWS lets the local deployment roles be omitted for an organization level deployment of any
+  # type but a patch policy, and requires them for every single account deployment. They are
+  # therefore passed whenever this module creates them, and always in single account mode --
+  # but an organization level setup that reuses roles created elsewhere sends neither, rather
+  # than naming roles this module cannot confirm exist.
+  jit_pass_deployment_roles = local.jit_create_deployment_roles || !local.jit_organization_level
 
   # AWSQuickSetupDeploymentRolePolicy covers the StackSet plumbing every configuration type
   # shares but stops short of JIT node access: it grants nothing on the
@@ -172,19 +200,17 @@ resource "awscc_ssmquicksetup_configuration_manager" "jit_node_access" {
 
   configuration_definitions = [
     {
-      type = "AWSQuickSetupType-JITNA"
-      # Both are required here: AWS only lets them be omitted for organizational deployments
-      # of types other than a patch policy, and JIT node access is not one of those.
-      local_deployment_administration_role_arn = local.jit_administration_role_arn
-      local_deployment_execution_role_name     = local.jit_execution_role_name
+      type                                     = "AWSQuickSetupType-JITNA"
+      local_deployment_administration_role_arn = local.jit_pass_deployment_roles ? local.jit_administration_role_arn : null
+      local_deployment_execution_role_name     = local.jit_pass_deployment_roles ? local.jit_execution_role_name : null
 
-      parameters = {
-        "DelegatedAccountId"        = local.jit_delegated_account_id
-        "HomeRegion"                = local.jit_home_region
-        "IdentityProviderSetting"   = local.jit_identity_provider
-        "TargetOrganizationalUnits" = local.jit_target_organizational_units
-        "TargetRegions"             = local.jit_target_regions
-      }
+      parameters = merge({
+        "DelegatedAccountId"      = local.jit_delegated_account_id
+        "HomeRegion"              = local.jit_home_region
+        "IdentityProviderSetting" = local.jit_identity_provider
+        },
+        local.jit_targets,
+      )
     }
   ]
 
@@ -201,8 +227,8 @@ resource "awscc_ssmquicksetup_configuration_manager" "jit_node_access" {
 
   lifecycle {
     precondition {
-      condition     = local.jit_target_organizational_units != ""
-      error_message = "settings.fleet_manager.remote_desktop.recording.just_in_time_node_access.target_organizational_units is required when RDP recording is enabled. Just-in-time node access has no local account targeting mode: supply a comma separated list of organizational unit IDs, or the organization root ID to cover the whole organization."
+      condition     = !local.jit_organization_level || local.jit_target_organizational_units != ""
+      error_message = "settings.fleet_manager.remote_desktop.recording.just_in_time_node_access.target_organizational_units is required for an organization level setup. Supply a comma separated list of organizational unit IDs, or the organization root ID to cover the whole organization -- or set organization_level to false to set just-in-time node access up for this account alone."
     }
 
     precondition {

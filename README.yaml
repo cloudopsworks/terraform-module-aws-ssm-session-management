@@ -223,13 +223,15 @@ usage: |-
     #       kms_key_arn: ""                       # (Optional) Symmetric encrypt/decrypt customer managed key used to encrypt the recording while Systems Manager processes it. Default: "" (this module's key)
     #
     #       just_in_time_node_access:             # (Optional) Just-in-time node access setup, created only while recording is enabled. Deployed with the awscc provider as a Quick Setup configuration manager of type AWSQuickSetupType-JITNA.
-    #         target_organizational_units: ""     # (Required when recording is enabled) Comma separated organizational unit IDs, or the organization root ID. JIT node access has no local account targeting mode.
+    #         organization_level: true            # (Optional) Set it up across organizational units rather than for this account alone. When true the module must be applied from the Systems Manager delegated administrator account and target_organizational_units is required; when false it targets target_accounts instead. Default: true
+    #         target_organizational_units: ""     # (Required when organization_level is true) Comma separated organizational unit IDs, or the organization root ID. Not sent when organization_level is false.
+    #         target_accounts: ""                 # (Optional, organization_level false only) Comma separated account IDs. Not sent when organization_level is true. Default: "" (the account this module is applied in)
     #         target_regions: ""                  # (Optional) Comma separated Regions to enable it in. Must match, or be a subset of, the unified console target Regions. Default: "" (the Region this module is applied in)
     #         home_region: ""                     # (Optional) Region the unified Systems Manager console aggregates into. Default: "" (the Region this module is applied in)
     #         delegated_account_id: ""            # (Optional) Account ID of the Systems Manager delegated administrator. Default: "" (settings.organization.account_id when set, otherwise the current account)
     #         identity_provider: "IAM"            # (Optional) Where the approver identity behind an access request is read from. Values: IAM, SSO. Default: "IAM"
     #         name: ""                            # (Optional) Name of the Quick Setup configuration manager. Default: "" ("<system-name>-jitna")
-    #         create_deployment_roles: true       # (Optional) Create the Quick Setup local deployment roles. Set to false when Quick Setup already created them here, since IAM rejects a duplicate role name. Default: true
+    #         create_deployment_roles: true       # (Optional) Create the Quick Setup local deployment roles. Set to false when Quick Setup already created them here, since IAM rejects a duplicate role name. An organization level setup then sends no role at all, which AWS permits; a single account setup always sends them, because AWS requires them there. Default: true
     #         administration_role_name: ""        # (Optional) Name of the administration role CloudFormation assumes to run the deployment. Default: "" ("AWS-QuickSetup-StackSet-Local-AdministrationRole")
     #         execution_role_name: ""             # (Optional) Name of the execution role the deployment runs as. Default: "" ("AWS-QuickSetup-StackSet-Local-ExecutionRole")
     #         additional_policy_arns: []          # (Optional) Extra managed policy ARNs attached to the execution role, on top of AWSQuickSetupDeploymentRolePolicy and AWSQuickSetupJITNADeploymentRolePolicy. Default: []
@@ -556,8 +558,17 @@ examples: |-
   > so it is acknowledged explicitly with `just_in_time_node_access_enabled: true` rather than acquired as
   > a side effect of asking for recording.
   >
-  > **What stays yours:** the unified Systems Manager console must already be set up for the organization,
-  > and this module must be applied from the Systems Manager delegated administrator account. If Quick
+  > **Two scopes.** `just_in_time_node_access.organization_level` selects between them and defaults to
+  > `true`:
+  >
+  > | | `organization_level: true` (default) | `organization_level: false` |
+  > |---|---|---|
+  > | Targets | `target_organizational_units` (required) | `target_accounts` (defaults to this account) |
+  > | Apply from | the Systems Manager delegated administrator account | the account being set up |
+  > | Deployment roles | optional — omitted entirely when `create_deployment_roles: false` | required by AWS, always sent |
+  >
+  > **What stays yours:** the unified Systems Manager console must already be set up, covering at least
+  > the Regions targeted here — JIT node access can only be enabled where the unified console is. If Quick
   > Setup has already created the deployment roles in this account, set
   > `just_in_time_node_access.create_deployment_roles: false` — IAM rejects a duplicate role name.
 
