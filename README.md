@@ -244,6 +244,7 @@ settings:
   #   remote_desktop:                           # (Optional) Fleet Manager Remote Desktop. Connections otherwise inherit the Session Manager preferences configured above — recording is the only separately configurable setting.
   #     recording:                              # (Optional) RDP connection recording, uploaded to S3 by the ssm-guiconnect service principal.
   #       enabled: false                        # (Optional) Record RDP connections. Requires a symmetric customer managed KMS key AND just-in-time node access, which this module sets up. Default: false
+  #       just_in_time_node_access_enabled: false # (Optional) Deprecated, use just_in_time_node_access.enabled instead. Default: false
   #       bucket_name: ""                       # (Optional) Destination bucket. Leave empty to use this module's audit bucket, in which case the required bucket policy statement and KMS grant are added automatically. Default: ""
   #       bucket_owner: ""                      # (Optional) Account ID owning the destination bucket. Default: "" (the current account)
   #       kms_key_arn: ""                       # (Optional) Symmetric encrypt/decrypt customer managed key used to encrypt the recording while Systems Manager processes it. Default: "" (this module's key)
@@ -598,7 +599,8 @@ settings:
 >
 > That reaches every account in the organizational units you target and is billed after a 30 day trial,
 > so it is acknowledged explicitly with `just_in_time_node_access.enabled: true` rather than acquired as
-> a side effect of asking for recording.
+> a side effect of asking for recording. (`just_in_time_node_access_enabled` at the `recording` level is
+> the original spelling of that flag and still works, but the nested one is canonical.)
 >
 > **Two scopes.** `just_in_time_node_access.organization_level` selects between them and defaults to
 > `false`, setting just-in-time node access up for the account this module is applied in:

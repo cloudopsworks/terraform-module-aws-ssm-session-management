@@ -297,7 +297,15 @@ locals {
   # Gated on the caller confirming the prerequisite above, so a misconfiguration surfaces as
   # a plan-time error naming the actual cause rather than an opaque Cloud Control 403 after
   # the rest of the stack has already applied.
-  rdp_jit_node_access_enabled = try(var.settings.fleet_manager.remote_desktop.recording.just_in_time_node_access.enabled, false)
+  # Canonical spelling is just_in_time_node_access.enabled, alongside the rest of the
+  # just-in-time settings. The flat just_in_time_node_access_enabled is the original spelling,
+  # kept working so configurations written against earlier releases keep applying. An explicit
+  # value under the block wins -- try only falls through when the attribute is absent.
+  rdp_jit_node_access_enabled = try(
+    var.settings.fleet_manager.remote_desktop.recording.just_in_time_node_access.enabled,
+    var.settings.fleet_manager.remote_desktop.recording.just_in_time_node_access_enabled,
+    false,
+  )
 
   rdp_recording_enabled = local.fleet_manager_enabled && try(var.settings.fleet_manager.remote_desktop.recording.enabled, false) && local.rdp_jit_node_access_enabled
 
