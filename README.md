@@ -244,12 +244,13 @@ settings:
   #   remote_desktop:                           # (Optional) Fleet Manager Remote Desktop. Connections otherwise inherit the Session Manager preferences configured above — recording is the only separately configurable setting.
   #     recording:                              # (Optional) RDP connection recording, uploaded to S3 by the ssm-guiconnect service principal.
   #       enabled: false                        # (Optional) Record RDP connections. Requires a symmetric customer managed KMS key AND just-in-time node access, which this module sets up. Default: false
-  #       just_in_time_node_access_enabled: false # (Required when enabled is true) Acknowledges that recording is a just-in-time node access feature and authorises this module to set JIT node access up, through the Quick Setup AWSQuickSetupType-JITNA configuration type and its deployment roles. JIT node access is billed after a 30 day trial. Default: false
+  #       just_in_time_node_access_enabled: false # (Optional) Deprecated, use just_in_time_node_access.enabled instead. Default: false
   #       bucket_name: ""                       # (Optional) Destination bucket. Leave empty to use this module's audit bucket, in which case the required bucket policy statement and KMS grant are added automatically. Default: ""
   #       bucket_owner: ""                      # (Optional) Account ID owning the destination bucket. Default: "" (the current account)
   #       kms_key_arn: ""                       # (Optional) Symmetric encrypt/decrypt customer managed key used to encrypt the recording while Systems Manager processes it. Default: "" (this module's key)
   #
   #       just_in_time_node_access:             # (Optional) Just-in-time node access setup, created only while recording is enabled. Deployed with the awscc provider as a Quick Setup configuration manager of type AWSQuickSetupType-JITNA.
+  #         enabled: false                      # (Required when recording is enabled) Acknowledges that recording is a just-in-time node access feature and authorises this module to set JIT node access up, through the Quick Setup AWSQuickSetupType-JITNA configuration type and its deployment roles. JIT node access is billed after a 30 day trial. Default: false
   #         organization_level: false           # (Optional) Set it up across organizational units rather than for this account alone. When true the module must be applied from the Systems Manager delegated administrator account and target_organizational_units is required; when false it targets target_accounts instead. Default: false
   #         target_organizational_units: ""     # (Required when organization_level is true) Comma separated organizational unit IDs, or the organization root ID. Not sent when organization_level is false.
   #         target_accounts: ""                 # (Optional, organization_level false only) Comma separated account IDs. Not sent when organization_level is true. Default: "" (the account this module is applied in)
@@ -597,8 +598,9 @@ settings:
 > `AWSQuickSetupJITNADeploymentRolePolicy`.
 >
 > That reaches every account in the organizational units you target and is billed after a 30 day trial,
-> so it is acknowledged explicitly with `just_in_time_node_access_enabled: true` rather than acquired as
-> a side effect of asking for recording.
+> so it is acknowledged explicitly with `just_in_time_node_access.enabled: true` rather than acquired as
+> a side effect of asking for recording. (`just_in_time_node_access_enabled` at the `recording` level is
+> the original spelling of that flag and still works, but the nested one is canonical.)
 >
 > **Two scopes.** `just_in_time_node_access.organization_level` selects between them and defaults to
 > `false`, setting just-in-time node access up for the account this module is applied in:
@@ -628,8 +630,8 @@ settings:
     remote_desktop:
       recording:
         enabled: true
-        just_in_time_node_access_enabled: true   # acknowledges that JIT node access is set up alongside it
         just_in_time_node_access:
+          enabled: true                            # acknowledges that JIT node access is set up alongside it
           target_regions: "us-east-1"              # defaults to this account; see organization_level below
 ```
 
@@ -643,8 +645,8 @@ settings:
     remote_desktop:
       recording:
         enabled: true
-        just_in_time_node_access_enabled: true
         just_in_time_node_access:
+          enabled: true
           organization_level: true
           target_organizational_units: "ou-abcd-11111111,ou-abcd-22222222"
           target_regions: "us-east-1"
@@ -660,7 +662,8 @@ settings:
     remote_desktop:
       recording:
         enabled: true
-        just_in_time_node_access_enabled: true
+        just_in_time_node_access:
+          enabled: true
         bucket_name: "my-central-rdp-recordings"
         bucket_owner: "123456789012"
         kms_key_arn: "arn:aws:kms:us-east-1:123456789012:key/abcd1234-..."
