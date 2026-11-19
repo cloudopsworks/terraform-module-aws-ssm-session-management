@@ -3,8 +3,7 @@
   ** 
   ** This file was automatically generated. 
   ** 1) Make all changes to `README.yaml` 
-  ** 2) Run `make init` (you only need to do this once)
-  ** 3) Run`make readme` to rebuild this file. 
+  ** 2) Run `tronador readme build` to rebuild this file.
   -->
 [![README Header][readme_header_img]][readme_header_link]
 
@@ -243,11 +242,26 @@ settings:
   #
   #   remote_desktop:                           # (Optional) Fleet Manager Remote Desktop. Connections otherwise inherit the Session Manager preferences configured above — recording is the only separately configurable setting.
   #     recording:                              # (Optional) RDP connection recording, uploaded to S3 by the ssm-guiconnect service principal.
-  #       enabled: false                        # (Optional) Record RDP connections. Requires a symmetric customer managed KMS key AND just-in-time node access already enabled. Default: false
-  #       just_in_time_node_access_enabled: false # (Required when enabled is true) Confirms just-in-time node access is already enabled here. Recording is a JIT feature; JIT is enabled console-only from the Organizations delegated administrator account, needs the unified Systems Manager console, is billed after a 30 day trial, and cannot be turned on by Terraform. Default: false
+  #       enabled: false                        # (Optional) Record RDP connections. Requires a symmetric customer managed KMS key AND just-in-time node access, which this module sets up. Default: false
+  #       just_in_time_node_access_enabled: false # (Optional) Deprecated, use just_in_time_node_access.enabled instead. Default: false
   #       bucket_name: ""                       # (Optional) Destination bucket. Leave empty to use this module's audit bucket, in which case the required bucket policy statement and KMS grant are added automatically. Default: ""
   #       bucket_owner: ""                      # (Optional) Account ID owning the destination bucket. Default: "" (the current account)
   #       kms_key_arn: ""                       # (Optional) Symmetric encrypt/decrypt customer managed key used to encrypt the recording while Systems Manager processes it. Default: "" (this module's key)
+  #
+  #       just_in_time_node_access:             # (Optional) Just-in-time node access setup, created only while recording is enabled. Deployed with the awscc provider as a Quick Setup configuration manager of type AWSQuickSetupType-JITNA.
+  #         enabled: false                      # (Required when recording is enabled) Acknowledges that recording is a just-in-time node access feature and authorises this module to set JIT node access up, through the Quick Setup AWSQuickSetupType-JITNA configuration type and its deployment roles. JIT node access is billed after a 30 day trial. Default: false
+  #         organization_level: false           # (Optional) Set it up across organizational units rather than for this account alone. When true the module must be applied from the Systems Manager delegated administrator account and target_organizational_units is required; when false it targets target_accounts instead. Default: false
+  #         target_organizational_units: ""     # (Required when organization_level is true) Comma separated organizational unit IDs, or the organization root ID. Not sent when organization_level is false.
+  #         target_accounts: ""                 # (Optional, organization_level false only) Comma separated account IDs. Not sent when organization_level is true. Default: "" (the account this module is applied in)
+  #         target_regions: ""                  # (Optional) Comma separated Regions to enable it in. Must match, or be a subset of, the unified console target Regions. Default: "" (the Region this module is applied in)
+  #         home_region: ""                     # (Optional) Region the unified Systems Manager console aggregates into. Default: "" (the Region this module is applied in)
+  #         delegated_account_id: ""            # (Optional) Account ID of the Systems Manager delegated administrator. Default: "" (settings.organization.account_id when set, otherwise the current account)
+  #         identity_provider: "IAM"            # (Optional) Where the approver identity behind an access request is read from. Values: IAM, SSO. Default: "IAM"
+  #         name: ""                            # (Optional) Name of the Quick Setup configuration manager. Default: "" ("<system-name>-jitna")
+  #         create_deployment_roles: true       # (Optional) Create the Quick Setup local deployment roles. Set to false when Quick Setup already created them here, since IAM rejects a duplicate role name. An organization level setup then sends no role at all, which AWS permits; a single account setup always sends them, because AWS requires them there. Default: true
+  #         administration_role_name: ""        # (Optional) Name of the administration role CloudFormation assumes to run the deployment. Default: "" ("AWS-QuickSetup-StackSet-Local-AdministrationRole")
+  #         execution_role_name: ""             # (Optional) Name of the execution role the deployment runs as. Default: "" ("AWS-QuickSetup-StackSet-Local-ExecutionRole")
+  #         additional_policy_arns: []          # (Optional) Extra managed policy ARNs attached to the execution role, on top of AWSQuickSetupDeploymentRolePolicy and AWSQuickSetupJITNADeploymentRolePolicy. Default: []
   #
   #   resource_data_sync:                         # (Optional) Aggregates the collected Inventory into an S3 bucket so it can be queried with Athena.
   #     enabled: false                            # (Optional) Create the resource data sync. Default: false
@@ -573,14 +587,33 @@ settings:
 
 ### Recording Remote Desktop connections
 
-> **Prerequisite: just-in-time node access must already be enabled.** RDP recording is a just-in-time
-> node access feature, not a standalone Fleet Manager one. Just-in-time node access is enabled from the
-> Systems Manager console in the Organizations delegated administrator account (**Just-in-time node
-> access → Enable the new experience**), depends on the unified Systems Manager console, and is billed
-> after a 30 day trial. No API, CloudFormation resource or Terraform provider can turn it on, so this
-> module cannot do it for you. Enabling recording without it fails asynchronously with
-> `403 Just-in-time node access is not enabled`, which is why the module makes you confirm the
-> prerequisite explicitly with `just_in_time_node_access_enabled`.
+> **Turning recording on also sets up just-in-time node access.** RDP recording is a just-in-time node
+> access feature, not a standalone Fleet Manager one: without JIT node access every connection fails
+> asynchronously with `403 Just-in-time node access is not enabled`. So whenever recording is enabled the
+> module also creates a Quick Setup configuration manager of type `AWSQuickSetupType-JITNA` and the two
+> local deployment roles it requires — `AWS-QuickSetup-StackSet-Local-AdministrationRole`, which
+> CloudFormation assumes to run the StackSet, and `AWS-QuickSetup-StackSet-Local-ExecutionRole`, which
+> the deployment runs as and which carries `AWSQuickSetupDeploymentRolePolicy` and
+> `AWSQuickSetupJITNADeploymentRolePolicy`.
+>
+> That reaches every account in the organizational units you target and is billed after a 30 day trial,
+> so it is acknowledged explicitly with `just_in_time_node_access.enabled: true` rather than acquired as
+> a side effect of asking for recording. (`just_in_time_node_access_enabled` at the `recording` level is
+> the original spelling of that flag and still works, but the nested one is canonical.)
+>
+> **Two scopes.** `just_in_time_node_access.organization_level` selects between them and defaults to
+> `false`, setting just-in-time node access up for the account this module is applied in:
+>
+> | | `organization_level: false` (default) | `organization_level: true` |
+> |---|---|---|
+> | Targets | `target_accounts` (defaults to this account) | `target_organizational_units` (required) |
+> | Apply from | the account being set up | the Systems Manager delegated administrator account |
+> | Deployment roles | required by AWS, always sent | optional — omitted entirely when `create_deployment_roles: false` |
+>
+> **What stays yours:** the unified Systems Manager console must already be set up, covering at least
+> the Regions targeted here — JIT node access can only be enabled where the unified console is. If Quick
+> Setup has already created the deployment roles in this account, set
+> `just_in_time_node_access.create_deployment_roles: false` — IAM rejects a duplicate role name.
 
 Records Fleet Manager RDP connections to S3. Leaving `bucket_name` empty sends them to the audit bucket
 this module already manages, and the `ssm-guiconnect` bucket policy statement and KMS grant are added
@@ -596,7 +629,26 @@ settings:
     remote_desktop:
       recording:
         enabled: true
-        just_in_time_node_access_enabled: true   # confirms you have already enabled it in the console
+        just_in_time_node_access:
+          enabled: true                            # acknowledges that JIT node access is set up alongside it
+          target_regions: "us-east-1"              # defaults to this account; see organization_level below
+```
+
+To set just-in-time node access up across the organization instead, turn `organization_level` on and
+name the organizational units. Apply that from the Systems Manager delegated administrator account:
+
+```yaml
+settings:
+  fleet_manager:
+    enabled: true
+    remote_desktop:
+      recording:
+        enabled: true
+        just_in_time_node_access:
+          enabled: true
+          organization_level: true
+          target_organizational_units: "ou-abcd-11111111,ou-abcd-22222222"
+          target_regions: "us-east-1"
 ```
 
 Recording requires a symmetric, encrypt/decrypt customer managed key; the key this module creates
@@ -609,6 +661,8 @@ settings:
     remote_desktop:
       recording:
         enabled: true
+        just_in_time_node_access:
+          enabled: true
         bucket_name: "my-central-rdp-recordings"
         bucket_owner: "123456789012"
         kms_key_arn: "arn:aws:kms:us-east-1:123456789012:key/abcd1234-..."
@@ -866,9 +920,13 @@ Available targets:
 | ---- | ---- |
 | [aws_cloudwatch_log_group.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_iam_role.default_host_management](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.jit_node_access_administration](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.jit_node_access_execution](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy.default_host_management_session_logging](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy.jit_node_access_administration](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_iam_role_policy_attachment.default_host_management](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.default_host_management_additional](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_role_policy_attachment.jit_node_access_execution](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_kms_alias.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_alias) | resource |
 | [aws_kms_key.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
 | [aws_organizations_delegated_administrator.cloud_formation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/organizations_delegated_administrator) | resource |
@@ -883,6 +941,7 @@ Available targets:
 | [aws_ssmquicksetup_configuration_manager.host](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [aws_ssmquicksetup_configuration_manager.patch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [awscc_ssmguiconnect_preferences.remote_desktop](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmguiconnect_preferences) | resource |
+| [awscc_ssmquicksetup_configuration_manager.jit_node_access](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [random_string.random](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_iam_role.allowed](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_role) | data source |
@@ -923,6 +982,9 @@ Available targets:
 | <a name="output_host_management_quicksetup_manager_arn"></a> [host\_management\_quicksetup\_manager\_arn](#output\_host\_management\_quicksetup\_manager\_arn) | ARN of the Quick Setup configuration manager deploying Host Management. Empty when settings.host\_management is disabled. |
 | <a name="output_inventory_association_id"></a> [inventory\_association\_id](#output\_inventory\_association\_id) | ID of the State Manager association running AWS-GatherSoftwareInventory. Empty when Inventory collection is disabled. |
 | <a name="output_inventory_association_name"></a> [inventory\_association\_name](#output\_inventory\_association\_name) | Name of the State Manager association running AWS-GatherSoftwareInventory. Empty when Inventory collection is disabled. |
+| <a name="output_jit_node_access_administration_role_arn"></a> [jit\_node\_access\_administration\_role\_arn](#output\_jit\_node\_access\_administration\_role\_arn) | ARN of the Quick Setup local deployment administration role used to deploy just-in-time node access. Empty when RDP recording is disabled. |
+| <a name="output_jit_node_access_execution_role_arn"></a> [jit\_node\_access\_execution\_role\_arn](#output\_jit\_node\_access\_execution\_role\_arn) | ARN of the Quick Setup local deployment execution role used to deploy just-in-time node access. Empty when RDP recording is disabled. |
+| <a name="output_jit_node_access_quicksetup_manager_arn"></a> [jit\_node\_access\_quicksetup\_manager\_arn](#output\_jit\_node\_access\_quicksetup\_manager\_arn) | ARN of the Quick Setup configuration manager enabling just-in-time node access. Empty when RDP recording is disabled. |
 | <a name="output_kms_key_alias"></a> [kms\_key\_alias](#output\_kms\_key\_alias) | Alias of the KMS key created by this module. Empty when the module does not create a key. |
 | <a name="output_kms_key_arn"></a> [kms\_key\_arn](#output\_kms\_key\_arn) | ARN of the KMS key used to encrypt session data. Empty when no customer managed key is in use. |
 | <a name="output_kms_key_id"></a> [kms\_key\_id](#output\_kms\_key\_id) | Key ID of the KMS key used to encrypt session data, whether created by this module or supplied. Empty when no customer managed key is in use. |
