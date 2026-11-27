@@ -30,6 +30,14 @@ locals {
   # Derived from configuration rather than from the resolved ARN so it stays known at
   # plan time, keeping dependent arguments out of "known after apply".
   has_kms_key = local.kms_create || try(var.settings.kms.key_id, "") != "" || try(var.settings.kms.key_alias, "") != ""
+
+  kms_data_actions = [
+    "kms:Encrypt",
+    "kms:Decrypt",
+    "kms:ReEncrypt*",
+    "kms:GenerateDataKey*",
+    "kms:Describe*",
+  ]
 }
 
 data "aws_kms_alias" "existing" {
@@ -42,6 +50,133 @@ data "aws_kms_key" "existing" {
   key_id = var.settings.kms.key_id
 }
 
+data "aws_iam_policy_document" "session_encryption" {
+  count     = local.kms_create ? 1 : 0
+  policy_id = "key-default-1"
+
+  statement {
+    sid       = "AllowRootAccountAccess"
+    actions   = ["kms:*"]
+    resources = ["*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.cloudwatch_enabled ? [1] : []
+    content {
+      sid       = "AllowCloudWatchLogsAccess"
+      actions   = local.kms_data_actions
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["logs.${data.aws_region.current.region}.amazonaws.com"]
+      }
+
+      condition {
+        test     = "ArnEquals"
+        variable = "kms:EncryptionContext:aws:logs:arn"
+        values   = ["arn:${data.aws_partition.current.partition}:logs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:log-group:${local.audit_log_group_name}"]
+      }
+    }
+  }
+
+  # SSM writes Inventory data as a service principal.
+  dynamic "statement" {
+    for_each = local.resource_data_sync_uses_module_key ? [1] : []
+    content {
+      sid       = "AllowSSMResourceDataSyncAccess"
+      actions   = local.kms_data_actions
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["ssm.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+    }
+  }
+
+  # GUI Connect encrypts recordings through S3 on the service principal's behalf.
+  dynamic "statement" {
+    for_each = local.rdp_recording_needs_bucket_key_grant ? [1] : []
+    content {
+      sid       = "AllowGuiConnectRecordingAccessViaS3"
+      actions   = ["kms:GenerateDataKey*"]
+      resources = ["*"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["ssm-guiconnect.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+      condition {
+        test     = "StringLike"
+        variable = "kms:ViaService"
+        values   = ["s3.${data.aws_region.current.region}.amazonaws.com"]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.has_allowed_iam_roles ? [1] : []
+    content {
+      sid       = "AllowIAMRolesAccess"
+      actions   = local.kms_data_actions
+      resources = ["*"]
+
+      principals {
+        type        = "AWS"
+        identifiers = local.allowed_role_principals
+      }
+    }
+  }
+
+  # Administrative roles use the key for object access without key policy or deletion privileges.
+  dynamic "statement" {
+    for_each = local.has_admin_iam_roles ? [1] : []
+    content {
+      sid       = "AllowIAMAdminRolesAccess"
+      actions   = local.kms_data_actions
+      resources = ["*"]
+
+      principals {
+        type        = "AWS"
+        identifiers = local.admin_role_principals
+      }
+    }
+  }
+
+  # Keep grant creation separate from ordinary key usage.
+  dynamic "statement" {
+    for_each = local.has_create_grant_iam_roles ? [1] : []
+    content {
+      sid       = "AllowIAMRolesCreateGrant"
+      actions   = ["kms:CreateGrant"]
+      resources = ["*"]
+
+      principals {
+        type        = "AWS"
+        identifiers = local.grant_role_principals
+      }
+    }
+  }
+}
+
 resource "aws_kms_key" "this" {
   count                   = local.kms_create ? 1 : 0
   description             = "KMS Key for SSM Documents managed by Session Management Module"
@@ -49,132 +184,8 @@ resource "aws_kms_key" "this" {
   enable_key_rotation     = try(var.settings.kms.enable_key_rotation, true)
   rotation_period_in_days = try(var.settings.kms.rotation_period_in_days, 90)
   multi_region            = try(var.settings.kms.multi_region, false)
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Id      = "key-default-1"
-    Statement = concat([
-      {
-        Sid    = "AllowRootAccountAccess"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"
-        }
-        Action   = "kms:*"
-        Resource = "*"
-      }],
-      local.cloudwatch_enabled ? [{
-        Sid    = "AllowCloudWatchLogsAccess"
-        Effect = "Allow"
-        Principal = {
-          Service = "logs.${data.aws_region.current.region}.amazonaws.com"
-        }
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:Describe*"
-        ]
-        Resource = "*"
-        Condition = {
-          ArnEquals = {
-            "kms:EncryptionContext:aws:logs:arn" = "arn:${data.aws_partition.current.partition}:logs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:log-group:${local.audit_log_group_name}"
-          }
-        }
-      }] : [],
-      # Resource data sync writes Inventory data as the service principal rather than as a
-      # role in this account, so the key policy has to grant it directly.
-      local.resource_data_sync_uses_module_key ? [{
-        Sid    = "AllowSSMResourceDataSyncAccess"
-        Effect = "Allow"
-        Principal = {
-          Service = "ssm.amazonaws.com"
-        }
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:Describe*"
-        ]
-        Resource = "*"
-        Condition = {
-          StringEquals = {
-            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
-          }
-        }
-      }] : [],
-      # GUI Connect writes the finished RDP recording into the audit bucket, so it needs to
-      # encrypt with the bucket's key. Scoped through kms:ViaService so the grant only
-      # applies to calls S3 makes on its behalf, never to direct use of the key.
-      local.rdp_recording_needs_bucket_key_grant ? [{
-        Sid    = "AllowGuiConnectRecordingAccessViaS3"
-        Effect = "Allow"
-        Principal = {
-          Service = "ssm-guiconnect.amazonaws.com"
-        }
-        Action   = "kms:GenerateDataKey*"
-        Resource = "*"
-        Condition = {
-          StringEquals = {
-            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
-          }
-          StringLike = {
-            "kms:ViaService" = "s3.${data.aws_region.current.region}.amazonaws.com"
-          }
-        }
-      }] : [],
-      local.has_allowed_iam_roles ? [{
-        Sid    = "AllowIAMRolesAccess"
-        Effect = "Allow"
-        Principal = {
-          AWS = local.allowed_iam_role_arns
-        }
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:Describe*"
-        ]
-        Resource = "*"
-      }] : [],
-      # The bucket is SSE-KMS encrypted, so S3 actions on their own cannot read an object body or
-      # write a new one. Administrative roles get the same data plane actions as the roles
-      # above -- deliberately not kms:*, which would let them rewrite this policy or
-      # schedule the key for deletion.
-      local.has_admin_iam_roles ? [{
-        Sid    = "AllowIAMAdminRolesAccess"
-        Effect = "Allow"
-        Principal = {
-          AWS = local.admin_iam_role_arns
-        }
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:Describe*"
-        ]
-        Resource = "*"
-      }] : [],
-      # Features that hand the key to another AWS service on the caller's behalf -- Just-in-Time
-      # node access and RDP recording among them -- need the caller to be able to create a grant.
-      # It is deliberately a separate list: kms:CreateGrant is the one data plane action that
-      # widens who else may use the key, so it is not folded into the write or admin tiers.
-      local.has_create_grant_iam_roles ? [{
-        Sid    = "AllowIAMRolesCreateGrant"
-        Effect = "Allow"
-        Principal = {
-          AWS = local.create_grant_iam_role_arns
-        }
-        Action = [
-          "kms:CreateGrant",
-        ]
-        Resource = "*"
-      }] : []
-    )
-  })
+  policy                  = replace(data.aws_iam_policy_document.session_encryption[0].json, local.escaped_policy_brace, "{")
+
   # The JIT access token policy authorizes use of the tagged session encryption key.
   tags = merge(
     local.all_tags,

@@ -86,77 +86,78 @@ locals {
   ))
 }
 
-# CloudFormation assumes this role to drive the StackSet operation. The condition keys keep
-# it usable only for Quick Setup's own stack sets in this account, so a confused deputy
-# cannot borrow it for an unrelated stack set.
-resource "aws_iam_role" "jit_node_access_administration" {
-  count       = local.jit_create_deployment_roles ? 1 : 0
-  name        = local.jit_administration_role_name
-  path        = "/"
-  description = "Quick Setup local deployment administration role assumed by CloudFormation to deploy just-in-time node access"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "cloudformation.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-        Condition = {
-          StringEquals = {
-            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
-          }
-          ArnLike = {
-            "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:cloudformation:*:${data.aws_caller_identity.current.account_id}:stackset/AWS-QuickSetup-*"
-          }
-        }
-      }
-    ]
-  })
-  tags = local.all_tags
-}
-
-# Kept as an inline policy on the administration role rather than a permission on the
-# execution role: it is the administration role's only privilege, and scoping it to the one
-# execution role ARN is what stops it assuming anything else.
-resource "aws_iam_role_policy" "jit_node_access_administration" {
+# CloudFormation can assume the administration role for this account's Quick Setup StackSets.
+data "aws_iam_policy_document" "jit_administration_trust" {
   count = local.jit_create_deployment_roles ? 1 : 0
-  name  = "AssumeRole-AWSQuickSetupStackSetLocalExecutionRole"
-  role  = aws_iam_role.jit_node_access_administration[0].id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid      = "AssumeLocalExecutionRole"
-        Effect   = "Allow"
-        Action   = "sts:AssumeRole"
-        Resource = aws_iam_role.jit_node_access_execution[0].arn
-      }
-    ]
-  })
+
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudformation.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:${data.aws_partition.current.partition}:cloudformation:*:${data.aws_caller_identity.current.account_id}:stackset/AWS-QuickSetup-*"]
+    }
+  }
 }
 
-# The role the deployment actually runs as. It is deliberately assumable only by the
-# administration role above, never by a service principal directly.
+resource "aws_iam_role" "jit_node_access_administration" {
+  count              = local.jit_create_deployment_roles ? 1 : 0
+  name               = local.jit_administration_role_name
+  path               = "/"
+  description        = "Quick Setup local deployment administration role assumed by CloudFormation to deploy just-in-time node access"
+  assume_role_policy = data.aws_iam_policy_document.jit_administration_trust[0].json
+  tags               = local.all_tags
+}
+
+data "aws_iam_policy_document" "jit_assume_execution_role" {
+  count = local.jit_create_deployment_roles ? 1 : 0
+
+  statement {
+    sid       = "AssumeLocalExecutionRole"
+    actions   = ["sts:AssumeRole"]
+    resources = [aws_iam_role.jit_node_access_execution[0].arn]
+  }
+}
+
+resource "aws_iam_role_policy" "jit_node_access_administration" {
+  count  = local.jit_create_deployment_roles ? 1 : 0
+  name   = "AssumeRole-AWSQuickSetupStackSetLocalExecutionRole"
+  role   = aws_iam_role.jit_node_access_administration[0].id
+  policy = data.aws_iam_policy_document.jit_assume_execution_role[0].json
+}
+
+data "aws_iam_policy_document" "jit_execution_trust" {
+  count = local.jit_create_deployment_roles ? 1 : 0
+
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "AWS"
+      identifiers = [aws_iam_role.jit_node_access_administration[0].arn]
+    }
+  }
+}
+
 resource "aws_iam_role" "jit_node_access_execution" {
-  count       = local.jit_create_deployment_roles ? 1 : 0
-  name        = local.jit_execution_role_name
-  path        = "/"
-  description = "Quick Setup local deployment execution role used to deploy just-in-time node access"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          AWS = aws_iam_role.jit_node_access_administration[0].arn
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
-  tags = local.all_tags
+  count              = local.jit_create_deployment_roles ? 1 : 0
+  name               = local.jit_execution_role_name
+  path               = "/"
+  description        = "Quick Setup local deployment execution role used to deploy just-in-time node access"
+  assume_role_policy = data.aws_iam_policy_document.jit_execution_trust[0].json
+  tags               = local.all_tags
 }
 
 resource "aws_iam_role_policy_attachment" "jit_node_access_execution" {

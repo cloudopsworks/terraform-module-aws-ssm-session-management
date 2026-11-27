@@ -40,10 +40,23 @@ mock_provider "aws" {
       arn = "arn:aws:kms:us-east-1:123456789012:key/mock"
     }
   }
+
+  mock_resource "aws_cloudwatch_log_group" {
+    defaults = {
+      arn = "arn:aws:logs:us-east-1:123456789012:log-group:/aws/ssm/mock"
+    }
+  }
 }
 
 mock_provider "awscc" {}
 mock_provider "random" {}
+
+override_data {
+  target = data.aws_iam_policy_document.console_diagnosis_tagging
+  values = {
+    json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+  }
+}
 
 variables {
   org = {
@@ -65,6 +78,118 @@ run "defaults_leave_fleet_access_disabled" {
       output.unified_console_quicksetup_manager_arn == ""
     )
     error_message = "Unified console, JIT node access, and recording must be opt-in."
+  }
+}
+
+run "preserve_literal_policy_input_braces" {
+  command = plan
+
+  variables {
+    settings = {
+      allowed_iam_role_arns = ["arn:aws:iam::123456789012:role/team&{logs}/writer"]
+      bucket                = { name = "ssm-audit-policy-example" }
+      fleet_manager = {
+        enabled            = true
+        resource_data_sync = { enabled = true, prefix = "inventory&{logs}" }
+      }
+    }
+  }
+
+  override_data {
+    target = data.aws_iam_policy_document.session_encryption
+    values = {
+      json = <<-EOT
+        {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Action": "kms:Encrypt",
+            "Resource": "*",
+            "Principal": { "AWS": "arn:aws:iam::123456789012:role/team&~{logs}/writer" }
+          }]
+        }
+      EOT
+    }
+  }
+
+  assert {
+    condition = (
+      one(one([for statement in data.aws_iam_policy_document.audit_bucket.statement : statement if statement.sid == "SSMBucketDelivery"]).resources) ==
+      "arn:aws:s3:::ssm-audit-policy-example/inventory&~{logs}/*/accountid=123456789012/*" &&
+      one(one([for statement in data.aws_iam_policy_document.session_encryption[0].statement : statement if statement.sid == "AllowIAMRolesAccess"]).principals).identifiers ==
+      toset(["arn:aws:iam::123456789012:role/team&~{logs}/writer"]) &&
+      one(jsondecode(aws_kms_key.this[0].policy).Statement).Principal.AWS == "arn:aws:iam::123456789012:role/team&{logs}/writer"
+    )
+    error_message = "A literal ampersand followed by an opening brace must survive policy document rendering in configured paths and prefixes."
+  }
+}
+
+run "host_management_grants_s3_only_without_optional_logging" {
+  command = plan
+
+  variables {
+    settings = {
+      bucket = { name = "ssm-audit-policy-example" }
+      kms    = { enabled = false }
+      fleet_manager = {
+        enabled                 = true
+        default_host_management = { enabled = true }
+      }
+    }
+  }
+
+  assert {
+    condition = {
+      for statement in data.aws_iam_policy_document.default_host_management_session_logging[0].statement :
+      statement.sid => { actions = statement.actions, resources = statement.resources }
+      } == {
+      WriteSessionLogsToAuditBucket = {
+        actions   = toset(["s3:PutObject"])
+        resources = toset(["arn:aws:s3:::ssm-audit-policy-example/*"])
+      }
+      ReadAuditBucketEncryptionConfiguration = {
+        actions   = toset(["s3:GetEncryptionConfiguration"])
+        resources = toset(["arn:aws:s3:::ssm-audit-policy-example"])
+      }
+    }
+    error_message = "The default host management role must scope S3 actions and omit KMS and CloudWatch grants when disabled."
+  }
+}
+
+run "host_management_grants_kms_and_cloudwatch_when_enabled" {
+  command = plan
+
+  variables {
+    settings = {
+      bucket     = { name = "ssm-audit-policy-example" }
+      cloudwatch = { enabled = true }
+      fleet_manager = {
+        enabled                 = true
+        default_host_management = { enabled = true }
+      }
+    }
+  }
+
+  assert {
+    condition = {
+      for statement in data.aws_iam_policy_document.default_host_management_session_logging[0].statement :
+      statement.sid => { actions = statement.actions, resources = statement.resources }
+      if !contains(["WriteSessionLogsToAuditBucket", "ReadAuditBucketEncryptionConfiguration"], statement.sid)
+      } == {
+      UseSessionEncryptionKey = {
+        actions   = toset(["kms:Decrypt", "kms:GenerateDataKey"])
+        resources = toset(["arn:aws:kms:us-east-1:123456789012:key/mock"])
+      }
+      WriteSessionLogsToCloudWatch = {
+        actions   = toset(["logs:CreateLogStream", "logs:DescribeLogStreams", "logs:PutLogEvents"])
+        resources = toset(["arn:aws:logs:us-east-1:123456789012:log-group:/aws/ssm/mock:*"])
+      }
+      DiscoverSessionLogGroup = {
+        actions   = toset(["logs:DescribeLogGroups"])
+        resources = toset(["*"])
+      }
+    }
+    error_message = "The default host management role must add scoped KMS and CloudWatch stream access and discover log groups."
   }
 }
 
@@ -205,6 +330,7 @@ run "record_with_standalone_jit_settings" {
 
   variables {
     settings = {
+      bucket = { name = "ssm-audit-policy-example" }
       fleet_manager = {
         enabled = true
         remote_desktop = {
@@ -218,6 +344,33 @@ run "record_with_standalone_jit_settings" {
   assert {
     condition     = length(awscc_ssmquicksetup_configuration_manager.jit_node_access) == 1 && length(awscc_ssmguiconnect_preferences.remote_desktop) == 1
     error_message = "Canonical JIT settings must satisfy the recording prerequisite."
+  }
+
+  assert {
+    condition = (
+      one(data.aws_iam_policy_document.audit_bucket.statement).actions == toset(["s3:PutObject"]) &&
+      one(data.aws_iam_policy_document.audit_bucket.statement).resources == toset([
+        "arn:aws:s3:::ssm-audit-policy-example",
+        "arn:aws:s3:::ssm-audit-policy-example/*",
+      ]) &&
+      one(one(data.aws_iam_policy_document.audit_bucket.statement).principals).identifiers == toset(["ssm-guiconnect.amazonaws.com"]) &&
+      one(one(data.aws_iam_policy_document.audit_bucket.statement).condition).variable == "aws:SourceAccount" &&
+      toset(one(one(data.aws_iam_policy_document.audit_bucket.statement).condition).values) == toset(["123456789012"])
+    )
+    error_message = "The audit bucket policy must scope recording writes to GUI Connect and the current account."
+  }
+
+  assert {
+    condition = {
+      for condition in one([
+        for statement in data.aws_iam_policy_document.session_encryption[0].statement : statement
+        if statement.sid == "AllowGuiConnectRecordingAccessViaS3"
+      ]).condition : condition.variable => { test = condition.test, values = toset(condition.values) }
+      } == {
+      "aws:SourceAccount" = { test = "StringEquals", values = toset(["123456789012"]) }
+      "kms:ViaService"    = { test = "StringLike", values = toset(["s3.us-east-1.amazonaws.com"]) }
+    }
+    error_message = "The audit key policy must restrict the recording grant to the current account and calls through S3."
   }
 }
 
@@ -494,11 +647,10 @@ run "enable_unified_console_without_jit" {
   assert {
     condition = (
       awscc_iam_role_policy.console_diagnosis_untag[0].role_name == aws_iam_role.jit_node_access_execution[0].name &&
-      one(jsondecode(awscc_iam_role_policy.console_diagnosis_untag[0].policy_document).Statement) == {
-        Effect   = "Allow"
-        Action   = ["iam:TagRole", "iam:UntagRole"]
-        Resource = ["arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1"]
-      }
+      awscc_iam_role_policy.console_diagnosis_untag[0].policy_document == data.aws_iam_policy_document.console_diagnosis_tagging[0].json &&
+      coalesce(one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).effect, "Allow") == "Allow" &&
+      one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).actions == toset(["iam:TagRole", "iam:UntagRole"]) &&
+      one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).resources == toset(["arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1"])
     )
     error_message = "A standalone console must grant its execution role only TagRole and UntagRole on the local diagnosis role."
   }
@@ -548,18 +700,18 @@ run "scope_console_diagnosis_tagging_to_exact_account_and_regions" {
   }
 
   assert {
-    condition = jsondecode(awscc_iam_role_policy.console_diagnosis_untag[0].policy_document) == {
-      Version = "2012-10-17"
-      Statement = [{
-        Effect = "Allow"
-        Action = ["iam:TagRole", "iam:UntagRole"]
-        Resource = [
-          "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-eu-west-1",
-          "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1",
-          "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-west-2",
-        ]
-      }]
-    }
+    condition = (
+      awscc_iam_role_policy.console_diagnosis_untag[0].policy_document == data.aws_iam_policy_document.console_diagnosis_tagging[0].json &&
+      coalesce(data.aws_iam_policy_document.console_diagnosis_tagging[0].version, "2012-10-17") == "2012-10-17" &&
+      coalesce(one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).effect, "Allow") == "Allow" &&
+      one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).actions == toset(["iam:TagRole", "iam:UntagRole"]) &&
+      one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).resources == toset([
+        "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-eu-west-1",
+        "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1",
+        "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-west-2",
+      ]) &&
+      length(one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).condition) == 0
+    )
     error_message = "The policy must allow only TagRole and UntagRole for the deployment account's exact diagnosis roles in the home and target Regions."
   }
 }

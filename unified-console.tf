@@ -47,22 +47,24 @@ data "aws_organizations_organization" "unified_console" {
   count = local.unified_console_enabled && local.jit_organization_level && local.console_root_override == "" ? 1 : 0
 }
 
+data "aws_iam_policy_document" "console_diagnosis_tagging" {
+  count = local.console_uses_jit_roles && local.jit_create_deployment_roles ? 1 : 0
+
+  statement {
+    actions = ["iam:TagRole", "iam:UntagRole"]
+    resources = [
+      for region in local.console_diagnosis_regions :
+      "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/AWS-SSM-DiagnosisAdminRole-${data.aws_caller_identity.current.account_id}-${region}"
+    ]
+  }
+}
+
 # Keep the existing inline policy name so upgrades update the grant in place.
 resource "awscc_iam_role_policy" "console_diagnosis_untag" {
-  count       = local.console_uses_jit_roles && local.jit_create_deployment_roles ? 1 : 0
-  role_name   = aws_iam_role.jit_node_access_execution[0].name
-  policy_name = "QuickSetupSSMDiagnosisAdminUntag"
-  policy_document = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = ["iam:TagRole", "iam:UntagRole"]
-      Resource = [
-        for region in local.console_diagnosis_regions :
-        "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/AWS-SSM-DiagnosisAdminRole-${data.aws_caller_identity.current.account_id}-${region}"
-      ]
-    }]
-  })
+  count           = length(data.aws_iam_policy_document.console_diagnosis_tagging)
+  role_name       = aws_iam_role.jit_node_access_execution[0].name
+  policy_name     = "QuickSetupSSMDiagnosisAdminUntag"
+  policy_document = data.aws_iam_policy_document.console_diagnosis_tagging[0].json
 
   lifecycle {
     precondition {
