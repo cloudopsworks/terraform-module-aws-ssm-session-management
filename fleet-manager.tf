@@ -275,54 +275,26 @@ resource "aws_ssm_resource_data_sync" "inventory" {
 ##
 # Remote Desktop connection recording
 #
-# Fleet Manager Remote Desktop otherwise needs no configuration of its own: an RDP
-# connection applies the same Session Manager preferences written to the
-# SSM-SessionManagerRunShell document. Recording is the one thing that is separately
-# configurable, and it is exposed only through Cloud Control, hence the awscc provider.
-#
-# Recording is a just-in-time node access feature, not a standalone Fleet Manager one:
-# without JIT node access, Cloud Control fails asynchronously with a 403 "Just-in-time node
-# access is not enabled". Turning recording on therefore also sets JIT node access up, from
-# the Quick Setup AWSQuickSetupType-JITNA configuration type in jit-node-access.tf, together
-# with the deployment roles that configuration type requires.
-#
-# PREREQUISITES that stay the caller's: the unified Systems Manager console must already be
-# set up for the organization, and this module must be applied from the Systems Manager
-# delegated administrator account. JIT node access is billed after a 30 day trial.
-#
-# Recordings are written by the ssm-guiconnect service principal, which is why the audit
-# bucket policy and the KMS key policy both need statements of their own.
+# GUI Connect recording is optional for JIT connections. The recording service writes
+# to the destination bucket and uses the recording key while processing the connection.
 ##
 locals {
-  # Gated on the caller confirming the prerequisite above, so a misconfiguration surfaces as
-  # a plan-time error naming the actual cause rather than an opaque Cloud Control 403 after
-  # the rest of the stack has already applied.
-  # Canonical spelling is just_in_time_node_access.enabled, alongside the rest of the
-  # just-in-time settings. The flat just_in_time_node_access_enabled is the original spelling,
-  # kept working so configurations written against earlier releases keep applying. An explicit
-  # value under the block wins -- try only falls through when the attribute is absent.
-  rdp_jit_node_access_enabled = try(
-    var.settings.fleet_manager.remote_desktop.recording.just_in_time_node_access.enabled,
-    var.settings.fleet_manager.remote_desktop.recording.just_in_time_node_access_enabled,
-    false,
-  )
-
-  rdp_recording_enabled = local.fleet_manager_enabled && try(var.settings.fleet_manager.remote_desktop.recording.enabled, false) && local.rdp_jit_node_access_enabled
+  rdp_recording_enabled = local.fleet_manager_enabled && try(local.recording.enabled, false)
 
   # Same plan-time reasoning as the resource data sync: the bucket and key policies switch
   # on this, so it is derived from configuration and never from the resolved bucket name.
-  rdp_recording_uses_audit_bucket = local.rdp_recording_enabled && try(var.settings.fleet_manager.remote_desktop.recording.bucket_name, "") == ""
+  rdp_recording_uses_audit_bucket = local.rdp_recording_enabled && try(local.recording.bucket_name, "") == ""
 
-  rdp_recording_bucket = local.rdp_recording_uses_audit_bucket ? local.ssm_logs_bucket : try(var.settings.fleet_manager.remote_desktop.recording.bucket_name, "")
+  rdp_recording_bucket = local.rdp_recording_uses_audit_bucket ? local.ssm_logs_bucket : try(local.recording.bucket_name, "")
 
-  rdp_recording_bucket_owner = try(var.settings.fleet_manager.remote_desktop.recording.bucket_owner, "") != "" ? var.settings.fleet_manager.remote_desktop.recording.bucket_owner : data.aws_caller_identity.current.account_id
+  rdp_recording_bucket_owner = try(local.recording.bucket_owner, "") != "" ? local.recording.bucket_owner : data.aws_caller_identity.current.account_id
 
   # GUI Connect uses this key to encrypt the recording while it is still being processed on
   # Systems Manager resources, before it lands in S3. It must be a symmetric customer
   # managed key with encrypt/decrypt usage, in the same Region as the node.
-  rdp_recording_uses_module_key = local.rdp_recording_enabled && local.has_kms_key && try(var.settings.fleet_manager.remote_desktop.recording.kms_key_arn, "") == ""
+  rdp_recording_uses_module_key = local.rdp_recording_enabled && local.has_kms_key && try(local.recording.kms_key_arn, "") == ""
 
-  rdp_recording_kms_key_arn = try(var.settings.fleet_manager.remote_desktop.recording.kms_key_arn, "") != "" ? var.settings.fleet_manager.remote_desktop.recording.kms_key_arn : (
+  rdp_recording_kms_key_arn = try(local.recording.kms_key_arn, "") != "" ? local.recording.kms_key_arn : (
     local.rdp_recording_uses_module_key ? local.kms_key_arn : ""
   )
 
@@ -355,6 +327,16 @@ resource "awscc_ssmguiconnect_preferences" "remote_desktop" {
   ]
 
   lifecycle {
+    precondition {
+      condition     = local.jit_node_access_enabled
+      error_message = "To record RDP connections, enable settings.fleet_manager.remote_desktop.just_in_time_node_access.enabled."
+    }
+
+    precondition {
+      condition     = !local.rdp_recording_uses_audit_bucket || local.has_kms_key
+      error_message = "RDP recording to the module audit bucket requires a customer managed bucket key granting GUI Connect access. Configure settings.kms or specify an external recording bucket with the required permissions."
+    }
+
     precondition {
       condition     = local.rdp_recording_kms_key_arn != ""
       error_message = "settings.fleet_manager.remote_desktop.recording requires a customer managed KMS key. Either leave settings.kms.enabled at its default so this module creates one, supply settings.kms.key_id or settings.kms.key_alias, or set settings.fleet_manager.remote_desktop.recording.kms_key_arn explicitly."

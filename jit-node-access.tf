@@ -7,42 +7,21 @@
 #     Distributed Under Apache v2.0 License
 #
 
-##
-# Just-in-time node access setup.
-#
-# Fleet Manager Remote Desktop connection recording is a just-in-time node access feature:
-# without JIT node access the recording preferences still apply, but every connection fails
-# asynchronously with a 403 instead of producing a recording. AWS exposes the setup as the
-# Quick Setup AWSQuickSetupType-JITNA configuration type, so this whole file is gated on
-# local.rdp_recording_enabled -- nothing here exists for a module that is not recording.
-#
-# Quick Setup deploys the configuration through CloudFormation StackSets and therefore needs
-# a pair of local deployment roles: an administration role CloudFormation assumes, and an
-# execution role that administration role assumes in the target account. AWS names them
-# AWS-QuickSetup-StackSet-Local-AdministrationRole and
-# AWS-QuickSetup-StackSet-Local-ExecutionRole, and those names are kept so an account where
-# Quick Setup has already run from the console keeps working -- turn create_deployment_roles
-# off there rather than renaming, since IAM rejects a second role with the same name.
-#
-# The configuration manager itself goes through the awscc provider -- Quick Setup is only
-# exposed via Cloud Control. The two deployment roles are ordinary IAM and are created with
-# the aws provider, matching how every other role in this module is managed.
-#
-# The setup runs at one of two scopes, selected by organization_level: for the single account
-# this module is applied in, which is the default and matches how the rest of this module is
-# scoped, or across organizational units, which must be applied from the Systems Manager
-# delegated administrator account.
-#
-# PREREQUISITE this module does not create: the unified Systems Manager console
-# (AWSQuickSetupType-SSM) must already be set up, covering at least the Regions targeted here
-# -- JIT node access can only be enabled where the unified console is.
-##
+# Fleet Manager JIT access and RDP recording are separate settings. The JIT Quick Setup
+# configuration targets accounts and Regions already covered by the unified SSM console.
+# Existing installations can reuse their Quick Setup deployment roles.
 locals {
-  jit_node_access = try(var.settings.fleet_manager.remote_desktop.recording.just_in_time_node_access, {})
+  remote_desktop  = try(var.settings.fleet_manager.remote_desktop, {})
+  recording       = try(local.remote_desktop.recording, {})
+  jit_node_access = try(coalesce(local.remote_desktop.just_in_time_node_access), local.recording.just_in_time_node_access, {})
 
-  # Recording is the only consumer of just-in-time node access in this module, so the setup
-  # follows the recording toggle exactly rather than carrying a second switch of its own.
-  jit_node_access_enabled = local.rdp_recording_enabled
+  # The legacy recording options only authorized JIT while recording was active.
+  # A remote_desktop-level block owns all JIT options when supplied.
+  jit_node_access_enabled = local.fleet_manager_enabled && (
+    try(local.remote_desktop.just_in_time_node_access, null) != null
+    ? try(local.jit_node_access.enabled, false)
+    : local.rdp_recording_enabled && try(local.jit_node_access.enabled, local.recording.just_in_time_node_access_enabled, false)
+  )
 
   # Quick Setup deploys into the organization from the Systems Manager delegated
   # administrator account. settings.organization.account_id already names that account when
@@ -86,9 +65,7 @@ locals {
   jit_administration_role_name = try(local.jit_node_access.administration_role_name, "AWS-QuickSetup-StackSet-Local-AdministrationRole")
   jit_execution_role_name      = try(local.jit_node_access.execution_role_name, "AWS-QuickSetup-StackSet-Local-ExecutionRole")
 
-  # Composed from the names rather than read back off the resources: the two roles reference
-  # each other, and going through the resource attributes would be a dependency cycle. It
-  # also lets the configuration manager point at roles Quick Setup created earlier.
+  # Role names also identify pre-existing roles in a single-account deployment.
   jit_administration_role_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.jit_administration_role_name}"
   jit_execution_role_arn      = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.jit_execution_role_name}"
 
@@ -160,7 +137,7 @@ resource "aws_iam_role_policy" "jit_node_access_administration" {
         Sid      = "AssumeLocalExecutionRole"
         Effect   = "Allow"
         Action   = "sts:AssumeRole"
-        Resource = local.jit_execution_role_arn
+        Resource = aws_iam_role.jit_node_access_execution[0].arn
       }
     ]
   })
@@ -179,7 +156,7 @@ resource "aws_iam_role" "jit_node_access_execution" {
       {
         Effect = "Allow"
         Principal = {
-          AWS = local.jit_administration_role_arn
+          AWS = aws_iam_role.jit_node_access_administration[0].arn
         }
         Action = "sts:AssumeRole"
       }
@@ -229,12 +206,12 @@ resource "awscc_ssmquicksetup_configuration_manager" "jit_node_access" {
   lifecycle {
     precondition {
       condition     = !local.jit_organization_level || local.jit_target_organizational_units != ""
-      error_message = "settings.fleet_manager.remote_desktop.recording.just_in_time_node_access.target_organizational_units is required for an organization level setup. Supply a comma separated list of organizational unit IDs, or the organization root ID to cover the whole organization -- or set organization_level to false to set just-in-time node access up for this account alone."
+      error_message = "Set just_in_time_node_access.target_organizational_units to the target OUs or organization root when organization_level is true."
     }
 
     precondition {
       condition     = contains(["IAM", "SSO"], local.jit_identity_provider)
-      error_message = "settings.fleet_manager.remote_desktop.recording.just_in_time_node_access.identity_provider must be either \"IAM\" or \"SSO\"."
+      error_message = "just_in_time_node_access.identity_provider must be either \"IAM\" or \"SSO\"."
     }
   }
 }
