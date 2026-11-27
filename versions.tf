@@ -18,7 +18,7 @@ terraform {
     # Fleet Manager Remote Desktop recording preferences are only exposed through Cloud
     # Control; hashicorp/aws has no GUI Connect resource. 1.40 is the first release
     # carrying awscc_ssmguiconnect_preferences. This provider also manages the optional
-    # Quick Setup configuration that enables JIT access without recording.
+    # Quick Setup configurations for the unified console and JIT node access.
     awscc = {
       source  = "hashicorp/awscc"
       version = ">= 1.40"
