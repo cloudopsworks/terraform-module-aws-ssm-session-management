@@ -614,17 +614,19 @@ examples: |-
 
   #### Recover from a diagnosis role tagging failure
 
-  If a console StackSet reports `UnauthorizedTaggingOperation` for `iam:UntagRole` on an
-  `AWS-SSM-DiagnosisAdminRole`, grant the permission to the **StackSet execution role** named
-  in the error. The module adds this grant when it manages the console's shared execution role.
-  For an externally managed execution role, add the following statement in its owning stack.
-  Replace the example ARN with the diagnosis role ARN for each affected account and Region.
+  A console StackSet can report `UnauthorizedTaggingOperation` when adding or removing tags on
+  an `AWS-SSM-DiagnosisAdminRole`. The AWS managed deployment policy allows `iam:TagRole` only
+  under specific tag and request conditions. The module grants both `iam:TagRole` and
+  `iam:UntagRole` to the shared **StackSet execution role** it manages, scoped to the exact
+  diagnosis admin role ARNs in the current account's home and target Regions.
+  If the execution role named in the error is managed elsewhere, add this statement in its
+  owning stack. Substitute the diagnosis role ARN from the failed account and Region.
   [AWS Quick Setup SSM deployment policy](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AWSQuickSetupSSMDeploymentRolePolicy.html)
 
   ```json
   {
     "Effect": "Allow",
-    "Action": "iam:UntagRole",
+    "Action": ["iam:TagRole", "iam:UntagRole"],
     "Resource": "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1"
   }
   ```

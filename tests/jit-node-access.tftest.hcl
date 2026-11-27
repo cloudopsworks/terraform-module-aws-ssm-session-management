@@ -494,9 +494,13 @@ run "enable_unified_console_without_jit" {
   assert {
     condition = (
       awscc_iam_role_policy.console_diagnosis_untag[0].role_name == aws_iam_role.jit_node_access_execution[0].name &&
-      one(jsondecode(awscc_iam_role_policy.console_diagnosis_untag[0].policy_document).Statement).Resource == ["arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1"]
+      one(jsondecode(awscc_iam_role_policy.console_diagnosis_untag[0].policy_document).Statement) == {
+        Effect   = "Allow"
+        Action   = ["iam:TagRole", "iam:UntagRole"]
+        Resource = ["arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1"]
+      }
     )
-    error_message = "A standalone console must grant its execution role access to untag the local diagnosis role."
+    error_message = "A standalone console must grant its execution role only TagRole and UntagRole on the local diagnosis role."
   }
 
   assert {
@@ -512,7 +516,7 @@ run "enable_unified_console_without_jit" {
   }
 }
 
-run "scope_console_diagnosis_untag_to_exact_account_and_regions" {
+run "scope_console_diagnosis_tagging_to_exact_account_and_regions" {
   command = plan
 
   variables {
@@ -540,7 +544,7 @@ run "scope_console_diagnosis_untag_to_exact_account_and_regions" {
 
   assert {
     condition     = awscc_iam_role_policy.console_diagnosis_untag[0].role_name == "shared-console-execution"
-    error_message = "The untag policy must attach to the configured shared execution role."
+    error_message = "The diagnosis role tagging policy must attach to the configured shared execution role."
   }
 
   assert {
@@ -548,7 +552,7 @@ run "scope_console_diagnosis_untag_to_exact_account_and_regions" {
       Version = "2012-10-17"
       Statement = [{
         Effect = "Allow"
-        Action = "iam:UntagRole"
+        Action = ["iam:TagRole", "iam:UntagRole"]
         Resource = [
           "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-eu-west-1",
           "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1",
@@ -556,7 +560,7 @@ run "scope_console_diagnosis_untag_to_exact_account_and_regions" {
         ]
       }]
     }
-    error_message = "The policy must allow only iam:UntagRole for the deployment account's exact diagnosis roles in the home and target Regions."
+    error_message = "The policy must allow only TagRole and UntagRole for the deployment account's exact diagnosis roles in the home and target Regions."
   }
 }
 
