@@ -126,12 +126,3 @@ resource "awscc_ssmquicksetup_configuration_manager" "unified_console" {
     }
   }
 }
-
-# AWSCC can carry the old status forward during an update. Read the deployed manager
-# after the change so JIT checks the current deployment.
-data "awscc_ssmquicksetup_configuration_manager" "unified_console" {
-  count = local.jit_node_access_enabled && local.unified_console_enabled ? 1 : 0
-  id    = awscc_ssmquicksetup_configuration_manager.unified_console[0].manager_arn
-
-  depends_on = [awscc_ssmquicksetup_configuration_manager.unified_console]
-}

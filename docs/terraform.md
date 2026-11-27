@@ -61,7 +61,6 @@
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 | [aws_ssm_patch_baselines.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_patch_baselines) | data source |
-| [awscc_ssmquicksetup_configuration_manager.unified_console](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/data-sources/ssmquicksetup_configuration_manager) | data source |
 
 ## Inputs
 

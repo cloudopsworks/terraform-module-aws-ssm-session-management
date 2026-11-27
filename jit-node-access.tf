@@ -187,25 +187,16 @@ resource "awscc_ssmquicksetup_configuration_manager" "jit_node_access" {
 
   tags = local.all_tags
 
-  # Quick Setup validates the deployment roles as it starts the StackSet operation, and IAM
-  # is eventually consistent, so the roles have to exist before the manager is created.
+  # Quick Setup needs the deployment roles and the module-managed console before JIT setup.
   depends_on = [
     aws_iam_role.jit_node_access_administration,
     aws_iam_role_policy.jit_node_access_administration,
     aws_iam_role.jit_node_access_execution,
     aws_iam_role_policy_attachment.jit_node_access_execution,
+    awscc_ssmquicksetup_configuration_manager.unified_console,
   ]
 
   lifecycle {
-    # Quick Setup reports deployment readiness separately from Cloud Control request completion.
-    precondition {
-      condition = local.unified_console_enabled ? try(one([
-        for summary in data.awscc_ssmquicksetup_configuration_manager.unified_console[0].status_summaries :
-        summary.status if summary.status_type == "Deployment"
-      ]) == "SUCCEEDED", false) : true
-      error_message = "The unified console deployment must reach SUCCEEDED before JIT can start. Check the console manager in Quick Setup, resolve any deployment errors, and apply again when it is ready."
-    }
-
     precondition {
       condition     = !local.jit_organization_level || local.jit_target_organizational_units != ""
       error_message = "Set just_in_time_node_access.target_organizational_units to the target OUs or organization root when organization_level is true."

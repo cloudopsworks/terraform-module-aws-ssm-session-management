@@ -42,19 +42,7 @@ mock_provider "aws" {
   }
 }
 
-mock_provider "awscc" {
-  mock_data "awscc_ssmquicksetup_configuration_manager" {
-    defaults = {
-      status_summaries = [{
-        last_updated_at = "2026-11-27T12:00:00Z"
-        status          = "SUCCEEDED"
-        status_details  = {}
-        status_message  = ""
-        status_type     = "Deployment"
-      }]
-    }
-  }
-}
+mock_provider "awscc" {}
 mock_provider "random" {}
 
 variables {
@@ -97,11 +85,6 @@ run "enable_jit_without_recording" {
   assert {
     condition     = length(awscc_ssmquicksetup_configuration_manager.jit_node_access) == 1 && length(awscc_ssmguiconnect_preferences.remote_desktop) == 0
     error_message = "JIT node access must create a configuration independently of RDP recording."
-  }
-
-  assert {
-    condition     = length(data.awscc_ssmquicksetup_configuration_manager.unified_console) == 1
-    error_message = "Managed console deployment must be read before enabling JIT."
   }
 
   assert {
@@ -467,7 +450,6 @@ run "use_existing_unified_console" {
       length(awscc_ssmquicksetup_configuration_manager.jit_node_access) == 1 &&
       length(awscc_ssmquicksetup_configuration_manager.unified_console) == 0 &&
       output.unified_console_quicksetup_manager_arn == "" &&
-      length(data.awscc_ssmquicksetup_configuration_manager.unified_console) == 0 &&
       length(awscc_iam_role_policy.console_diagnosis_untag) == 0 &&
       !contains(keys(aws_iam_role_policy_attachment.jit_node_access_execution), "arn:aws:iam::aws:policy/AWSQuickSetupSSMDeploymentRolePolicy")
     )

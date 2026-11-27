@@ -624,9 +624,9 @@ and already covers the JIT target accounts and Regions.
 
 Set the `awscc` provider Region to the console home Region for creation and import. The console and
 JIT share the deployment mode and `home_region` under `settings.fleet_manager.remote_desktop.just_in_time_node_access`.
-After creating or updating the console manager, the module reads its deployment status through
-Cloud Control. JIT proceeds when the status is `SUCCEEDED`. If Quick Setup is still deploying,
-run a fresh plan and apply after the deployment succeeds.
+When the module manages both configurations, `depends_on` orders the unified console manager
+before the JIT manager. Quick Setup can still be deploying StackSets when JIT setup starts.
+If AWS reports that console setup is still in progress, retry after the deployment finishes.
 For a single account, use the current account and set the target Region to the home Region. For an
 organization, enable trusted access for Systems Manager, Quick Setup, CloudFormation StackSets and
 AWS Resource Explorer in AWS Organizations, register delegated administrators, and apply from the Systems Manager
@@ -688,7 +688,7 @@ manager_arn='arn:aws:ssm-quicksetup:us-east-1:123456789012:configuration-manager
 aws ssm-quicksetup get-configuration-manager --region us-east-1 --manager-arn "$manager_arn"
 ```
 
-Confirm that the `Deployment` entry under `StatusSummaries` is `SUCCEEDED` before enabling JIT.
+The `Deployment` entry under `StatusSummaries` shows the progress of the console rollout.
 Match the existing manager's name, description, tags, deployment roles, target root or account,
 target Regions and schedules in the inputs. If its parameters include `DelegatedAccountId`, set
 `unified_console.delegated_account_id` to that value. Otherwise, leave it unset. The console omits
@@ -1120,7 +1120,6 @@ Available targets:
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 | [aws_ssm_patch_baselines.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_patch_baselines) | data source |
-| [awscc_ssmquicksetup_configuration_manager.unified_console](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/data-sources/ssmquicksetup_configuration_manager) | data source |
 
 ## Inputs
 
