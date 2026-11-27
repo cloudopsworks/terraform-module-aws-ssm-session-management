@@ -27,16 +27,17 @@ locals {
   console_admin_role_arn = try(local.console_roles.administration_role_arn, null)
   console_execution_role = try(local.console_roles.execution_role_name, null)
 
-  console_extra_parameters = coalesce(try(local.unified_console.additional_parameters, null), {})
+  console_delegated_account_id = try(trimspace(local.unified_console.delegated_account_id), "")
+  console_extra_parameters     = coalesce(try(local.unified_console.additional_parameters, null), {})
 
   unified_console_parameters = merge({
     HomeRegion                  = local.jit_home_region
-    DelegatedAccountId          = local.jit_delegated_account_id
     TargetRegions               = local.unified_console_regions
-    AgentUpdateSchedule         = coalesce(try(local.unified_console.agent_update_schedule, null), "none")
-    EnableDHMCSchedule          = coalesce(try(local.unified_console.enable_dhmc_schedule, null), "none")
-    InventoryCollectionSchedule = coalesce(try(local.unified_console.inventory_collection_schedule, null), "none")
+    AgentUpdateSchedule         = coalesce(try(local.unified_console.agent_update_schedule, null), "rate(14 days)")
+    EnableDHMCSchedule          = coalesce(try(local.unified_console.enable_dhmc_schedule, null), "rate(1 day)")
+    InventoryCollectionSchedule = coalesce(try(local.unified_console.inventory_collection_schedule, null), "rate(12 hours)")
     },
+    local.console_delegated_account_id != "" ? { DelegatedAccountId = local.console_delegated_account_id } : {},
     local.jit_organization_level ? { TargetOrganizationalUnits = local.unified_console_root_id } : { TargetAccounts = data.aws_caller_identity.current.account_id },
   )
 }
@@ -82,9 +83,9 @@ resource "awscc_ssmquicksetup_configuration_manager" "unified_console" {
       condition = local.jit_organization_level || (
         local.unified_console_regions == local.jit_home_region &&
         local.jit_target_accounts == data.aws_caller_identity.current.account_id &&
-        local.jit_delegated_account_id == data.aws_caller_identity.current.account_id
+        (local.console_delegated_account_id == "" || local.console_delegated_account_id == data.aws_caller_identity.current.account_id)
       )
-      error_message = "A single-account unified console targets the current account and one Region. Use the same home and target Region."
+      error_message = "A single-account unified console targets the current account and one Region. Use the same home and target Region and, if supplying a console delegated account, use the current account."
     }
 
     precondition {
@@ -93,7 +94,7 @@ resource "awscc_ssmquicksetup_configuration_manager" "unified_console" {
     }
 
     precondition {
-      condition     = length(setintersection(keys(local.console_extra_parameters), concat(keys(local.unified_console_parameters), ["TargetAccounts", "TargetOrganizationalUnits"]))) == 0
+      condition     = length(setintersection(keys(local.console_extra_parameters), concat(keys(local.unified_console_parameters), ["TargetAccounts", "TargetOrganizationalUnits", "DelegatedAccountId"]))) == 0
       error_message = "Use the dedicated settings for console targets, home Region, delegated account and schedules. additional_parameters is for other Quick Setup parameters."
     }
   }

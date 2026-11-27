@@ -235,9 +235,10 @@ usage: |-
     #     description: ""                        # (Optional) Description of the Quick Setup configuration manager.
     #     target_regions: ""                     # (Optional) Comma-separated target Regions. Defaults to the JIT target Regions or its home Region.
     #     organization_root_id: ""               # (Optional) Organization root ID, for organization mode only. Discovered automatically when omitted.
-    #     agent_update_schedule: "none"          # (Optional) Quick Setup schedule for SSM Agent updates. Default: "none".
-    #     enable_dhmc_schedule: "none"           # (Optional) Quick Setup schedule for Default Host Management Configuration. Default: "none".
-    #     inventory_collection_schedule: "none"  # (Optional) Quick Setup schedule for Inventory collection. Default: "none".
+    #     delegated_account_id: ""               # (Optional) Delegated administrator account ID for the unified console. Omitted by default.
+    #     agent_update_schedule: "rate(14 days)"           # (Optional) SSM Agent updates schedule. Defaults to rate(14 days). Set to "none" to disable.
+    #     enable_dhmc_schedule: "rate(1 day)"              # (Optional) Default Host Management Configuration schedule. Defaults to rate(1 day). Set to "none" to disable.
+    #     inventory_collection_schedule: "rate(12 hours)"  # (Optional) Inventory collection schedule. Defaults to rate(12 hours). Set to "none" to disable.
     #     type_version: ""                       # (Optional) Quick Setup type version. Omit to use the provider or AWS default.
     #     additional_parameters: {}              # (Optional) Extra string parameters from the Quick Setup configuration definition.
     #     deployment_roles:                     # (Optional) Supply a separate existing role pair. Omit to share JIT roles, or set {} to omit both roles for an organization deployment.
@@ -252,7 +253,7 @@ usage: |-
     #       target_accounts: ""                 # (Optional, organization_level false only) Comma separated account IDs. Not sent when organization_level is true. Default: "" (the account this module is applied in)
     #       target_regions: ""                  # (Optional) Comma separated Regions to enable it in. Must match, or be a subset of, the unified console target Regions. Default: "" (the Region this module is applied in)
     #       home_region: ""                     # (Optional) Console home Region. Configure awscc in this Region to create or import the managers. Defaults to the aws provider Region.
-    #       delegated_account_id: ""            # (Optional) Account ID of the Systems Manager delegated administrator. Default: "" (settings.organization.account_id when set, otherwise the current account)
+    #       delegated_account_id: ""            # (Optional) Delegated administrator account ID for JIT. Default: "" (settings.organization.account_id when set, otherwise the current account)
     #       identity_provider: "IAM"            # (Optional) Where the approver identity behind an access request is read from. Values: IAM, SSO. Default: "IAM"
     #       name: ""                            # (Optional) Name of the Quick Setup configuration manager. Default: "" ("<system-name>-jitna")
     #       create_deployment_roles: true       # (Optional) Create the Quick Setup local deployment roles. Set to false when Quick Setup already created them here, since IAM rejects a duplicate role name. An organization level setup then sends no role at all, which AWS permits; a single account setup always sends them, because AWS requires them there. Default: true
@@ -592,9 +593,12 @@ examples: |-
   the module discovers unless you supply `unified_console.organization_root_id`. JIT can target
   selected OUs and a subset of the console Regions. [AWS CloudFormation example](https://github.com/aws-samples/cloud-operations-best-practices/blob/main/cloud-operations-best-practices/static/cfn-templates/just-in-time-node-access/just-in-time-quick-setup-cfn-template.yaml)
 
-  The module defaults the console's agent update, Default Host Management Configuration and Inventory
-  collection schedules to `none`. Keep these defaults when another deployment, such as SSM Compliance
-  Management, owns those capabilities. The module adds `AWSQuickSetupSSMDeploymentRolePolicy` to the
+  By default, the console checks for SSM Agent updates every 14 days, enables Default Host
+  Management Configuration daily and collects Inventory every 12 hours. When SSM Compliance
+  Management or another deployment owns one of these tasks for the same nodes, set the corresponding
+  console schedule to `"none"`. [AWS console setup defaults](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-setting-up-single-account-region.html)
+
+  The module adds `AWSQuickSetupSSMDeploymentRolePolicy` to the
   shared execution role when it creates the role. Omit `unified_console.deployment_roles` to share
   the JIT role configuration. If the console already uses a different role pair, set
   `unified_console.deployment_roles.administration_role_arn` and `execution_role_name` to the existing
@@ -624,7 +628,10 @@ examples: |-
 
   Confirm that the `Deployment` entry under `StatusSummaries` is `SUCCEEDED` before enabling JIT.
   Match the existing manager's name, description, tags, deployment roles, target root or account,
-  target Regions and schedules in the inputs. Use `unified_console.type_version` and
+  target Regions and schedules in the inputs. If its parameters include `DelegatedAccountId`, set
+  `unified_console.delegated_account_id` to that value. Otherwise, leave it unset. The console omits
+  this parameter by default in both single-account and organization deployments.
+  Use `unified_console.type_version` and
   `unified_console.additional_parameters` to retain the existing version and additional parameters
   where needed. Reuse existing deployment roles through their owning stack.
   [AWS CLI manager details](https://docs.aws.amazon.com/cli/latest/reference/ssm-quicksetup/get-configuration-manager.html)

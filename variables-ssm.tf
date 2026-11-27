@@ -82,9 +82,10 @@
 #       description: ""                        # (Optional) Description of the Quick Setup configuration manager.
 #       target_regions: ""                     # (Optional) Comma-separated target Regions. Defaults to the JIT target Regions or its home Region.
 #       organization_root_id: ""               # (Optional) Organization root ID, for organization mode only. Discovered automatically when omitted.
-#       agent_update_schedule: "none"          # (Optional) Quick Setup schedule for SSM Agent updates. Default: "none".
-#       enable_dhmc_schedule: "none"           # (Optional) Quick Setup schedule for Default Host Management Configuration. Default: "none".
-#       inventory_collection_schedule: "none"  # (Optional) Quick Setup schedule for Inventory collection. Default: "none".
+#       delegated_account_id: ""               # (Optional) Delegated administrator account ID for the unified console. Omitted by default.
+#       agent_update_schedule: "rate(14 days)"           # (Optional) SSM Agent updates schedule. Defaults to rate(14 days). Set to "none" to disable.
+#       enable_dhmc_schedule: "rate(1 day)"              # (Optional) Default Host Management Configuration schedule. Defaults to rate(1 day). Set to "none" to disable.
+#       inventory_collection_schedule: "rate(12 hours)"  # (Optional) Inventory collection schedule. Defaults to rate(12 hours). Set to "none" to disable.
 #       type_version: ""                       # (Optional) Quick Setup type version. Omit to use the provider or AWS default.
 #       additional_parameters: {}              # (Optional) Extra string parameters from the Quick Setup configuration definition.
 #       deployment_roles:                     # (Optional) Supply a separate existing role pair. Omit to share JIT roles, or set {} to omit both roles for an organization deployment.
@@ -99,7 +100,7 @@
 #         target_accounts: ""                     # (Optional, organization_level false only) Comma separated list of account IDs to enable it for. Not sent when organization_level is true. Default: "" (the account this module is applied in)
 #         target_regions: ""                      # (Optional) Comma separated list of regions to enable it in. Must match, or be a subset of, the unified console target regions. Default: "" (the region this module is applied in)
 #         home_region: ""                         # (Optional) Console home Region. Configure awscc in this Region to create or import the managers. Defaults to the aws provider Region.
-#         delegated_account_id: ""                # (Optional) Account ID of the Systems Manager delegated administrator. Default: "" (settings.organization.account_id when set, otherwise the current account)
+#         delegated_account_id: ""                # (Optional) Delegated administrator account ID for JIT. Default: "" (settings.organization.account_id when set, otherwise the current account)
 #         identity_provider: "IAM"                # (Optional) Where the approver identity behind an access request is read from. Values: IAM, SSO. Default: "IAM"
 #         name: ""                                # (Optional) Name of the Quick Setup configuration manager. Default: "" ("<system-name>-jitna")
 #         create_deployment_roles: true           # (Optional) Whether to create the Quick Setup local deployment roles below. Set to false when Quick Setup already created them in this account, since IAM rejects a duplicate role name. An organization level setup then sends no role at all, which AWS permits; a single account setup always sends them, because AWS requires them there. Default: true

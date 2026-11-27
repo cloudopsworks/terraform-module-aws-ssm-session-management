@@ -113,16 +113,15 @@ run "enable_jit_without_recording" {
     condition = (
       one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).type == "AWSQuickSetupType-SSM" &&
       one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters == tomap({
-        AgentUpdateSchedule         = "none"
-        EnableDHMCSchedule          = "none"
-        InventoryCollectionSchedule = "none"
-        DelegatedAccountId          = "123456789012"
+        AgentUpdateSchedule         = "rate(14 days)"
+        EnableDHMCSchedule          = "rate(1 day)"
+        InventoryCollectionSchedule = "rate(12 hours)"
         HomeRegion                  = "us-east-1"
         TargetAccounts              = "123456789012"
         TargetRegions               = "us-east-1"
       })
     )
-    error_message = "JIT must deploy a local unified console without taking over host management, inventory, or agent updates."
+    error_message = "The local unified console must use the AWS default schedules and omit an unspecified delegated account."
   }
 
   assert {
@@ -142,7 +141,7 @@ run "enable_jit_without_recording" {
       length(aws_ssmquicksetup_configuration_manager.patch) == 0 &&
       length(aws_ssmquicksetup_configuration_manager.dhmc) == 0
     )
-    error_message = "Enabling JIT alone must leave host management, inventory and patching available to another owner."
+    error_message = "JIT must leave the separate host management, inventory, and patch resources disabled by default."
   }
 
   assert {
@@ -167,6 +166,7 @@ run "enable_jit_for_organization" {
 
   variables {
     settings = {
+      organization = { account_id = "234567890123" }
       fleet_manager = {
         enabled = true
         remote_desktop = {
@@ -178,6 +178,7 @@ run "enable_jit_for_organization" {
             target_regions              = "us-east-1,us-west-2"
             home_region                 = "us-west-2"
             identity_provider           = "SSO"
+            delegated_account_id        = "345678901234"
           }
         }
       }
@@ -191,7 +192,7 @@ run "enable_jit_for_organization" {
 
   assert {
     condition = one(awscc_ssmquicksetup_configuration_manager.jit_node_access[0].configuration_definitions).parameters == tomap({
-      DelegatedAccountId        = "123456789012"
+      DelegatedAccountId        = "345678901234"
       HomeRegion                = "us-west-2"
       IdentityProviderSetting   = "SSO"
       TargetOrganizationalUnits = "ou-abcd-11111111"
@@ -203,16 +204,15 @@ run "enable_jit_for_organization" {
   assert {
     condition = (
       one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters == tomap({
-        AgentUpdateSchedule         = "none"
-        EnableDHMCSchedule          = "none"
-        InventoryCollectionSchedule = "none"
-        DelegatedAccountId          = "123456789012"
+        AgentUpdateSchedule         = "rate(14 days)"
+        EnableDHMCSchedule          = "rate(1 day)"
+        InventoryCollectionSchedule = "rate(12 hours)"
         HomeRegion                  = "us-west-2"
         TargetOrganizationalUnits   = "r-abcd"
         TargetRegions               = "us-east-1,us-west-2"
       })
     )
-    error_message = "Organization console must target the organization root with JIT's home and target Regions."
+    error_message = "The organization console must send the AWS default schedules and omit DelegatedAccountId even when organization and JIT account IDs are configured."
   }
 }
 
@@ -483,8 +483,9 @@ run "enable_unified_console_without_jit" {
         enabled = true
         unified_console = {
           enabled                       = true
-          agent_update_schedule         = "rate(14 days)"
-          enable_dhmc_schedule          = "rate(1 day)"
+          delegated_account_id          = null
+          agent_update_schedule         = "none"
+          enable_dhmc_schedule          = "none"
           inventory_collection_schedule = "rate(1 day)"
         }
       }
@@ -505,15 +506,14 @@ run "enable_unified_console_without_jit" {
 
   assert {
     condition = one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters == tomap({
-      AgentUpdateSchedule         = "rate(14 days)"
-      EnableDHMCSchedule          = "rate(1 day)"
+      AgentUpdateSchedule         = "none"
+      EnableDHMCSchedule          = "none"
       InventoryCollectionSchedule = "rate(1 day)"
-      DelegatedAccountId          = "123456789012"
       HomeRegion                  = "us-east-1"
       TargetAccounts              = "123456789012"
       TargetRegions               = "us-east-1"
     })
-    error_message = "The unified console must send the opted-in schedules to Quick Setup."
+    error_message = "The unified console must preserve explicit off and custom schedules and omit a null delegated account."
   }
 }
 
@@ -556,6 +556,7 @@ run "preserve_imported_organization_console_settings" {
           description           = "Existing organization configuration"
           type_version          = "1.0"
           organization_root_id  = "r-wxyz"
+          delegated_account_id  = "456789012345"
           target_regions        = "us-east-1,us-west-2,eu-west-1"
           additional_parameters = { ExistingSetting = "preserved" }
         }
@@ -588,9 +589,10 @@ run "preserve_imported_organization_console_settings" {
       awscc_ssmquicksetup_configuration_manager.unified_console[0].name == "existing-unified-console" &&
       awscc_ssmquicksetup_configuration_manager.unified_console[0].description == "Existing organization configuration" &&
       one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).type_version == "1.0" &&
-      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters["ExistingSetting"] == "preserved"
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters["ExistingSetting"] == "preserved" &&
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters["DelegatedAccountId"] == "456789012345"
     )
-    error_message = "Adoption must preserve the console's name, description, version, and additional parameters."
+    error_message = "Adoption must preserve the console's name, description, version, explicit delegated account, and additional parameters."
   }
 
   assert {
@@ -671,8 +673,11 @@ run "omit_organization_console_roles_when_jit_manages_roles" {
   variables {
     settings = {
       fleet_manager = {
-        enabled         = true
-        unified_console = { deployment_roles = {} }
+        enabled = true
+        unified_console = {
+          deployment_roles     = {}
+          delegated_account_id = "  "
+        }
         remote_desktop = {
           just_in_time_node_access = {
             enabled                     = true
@@ -693,6 +698,11 @@ run "omit_organization_console_roles_when_jit_manages_roles" {
       !contains(keys(aws_iam_role_policy_attachment.jit_node_access_execution), "arn:aws:iam::aws:policy/AWSQuickSetupSSMDeploymentRolePolicy")
     )
     error_message = "An explicit empty console role override must preserve service-managed console roles and JIT-owned roles."
+  }
+
+  assert {
+    condition     = !contains(keys(one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters), "DelegatedAccountId")
+    error_message = "The unified console must omit a blank delegated account."
   }
 }
 
