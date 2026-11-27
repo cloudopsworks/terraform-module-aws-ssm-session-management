@@ -82,4 +82,12 @@ locals {
   has_allowed_iam_roles      = length(local.allowed_iam_role_arns) > 0
   has_admin_iam_roles        = length(local.admin_iam_role_arns) > 0
   has_create_grant_iam_roles = length(local.create_grant_iam_role_arns) > 0
+
+  # aws_iam_policy_document interprets &{ as the start of an IAM policy variable.
+  # Protect every opening brace in caller-supplied IAM paths and S3 prefixes, then
+  # remove one tilde per brace from the rendered JSON. A literal ~{ round-trips too.
+  escaped_policy_brace    = "~{"
+  allowed_role_principals = [for arn in local.allowed_iam_role_arns : replace(arn, "{", local.escaped_policy_brace)]
+  admin_role_principals   = [for arn in local.admin_iam_role_arns : replace(arn, "{", local.escaped_policy_brace)]
+  grant_role_principals   = [for arn in local.create_grant_iam_role_arns : replace(arn, "{", local.escaped_policy_brace)]
 }

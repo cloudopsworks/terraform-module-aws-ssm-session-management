@@ -18,6 +18,17 @@ mock_provider "aws" {
     }
   }
 
+  mock_data "aws_organizations_organization" {
+    defaults = {
+      roots = [{
+        arn          = "arn:aws:organizations::123456789012:root/o-abcdefghij/r-abcd"
+        id           = "r-abcd"
+        name         = "Root"
+        policy_types = []
+      }]
+    }
+  }
+
   mock_data "aws_iam_policy_document" {
     defaults = {
       json = "{}"
@@ -29,10 +40,23 @@ mock_provider "aws" {
       arn = "arn:aws:kms:us-east-1:123456789012:key/mock"
     }
   }
+
+  mock_resource "aws_cloudwatch_log_group" {
+    defaults = {
+      arn = "arn:aws:logs:us-east-1:123456789012:log-group:/aws/ssm/mock"
+    }
+  }
 }
 
 mock_provider "awscc" {}
 mock_provider "random" {}
+
+override_data {
+  target = data.aws_iam_policy_document.console_diagnosis_tagging
+  values = {
+    json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+  }
+}
 
 variables {
   org = {
@@ -43,12 +67,129 @@ variables {
   }
 }
 
-run "defaults_leave_jit_disabled" {
+run "defaults_leave_fleet_access_disabled" {
   command = plan
 
   assert {
-    condition     = length(awscc_ssmquicksetup_configuration_manager.jit_node_access) == 0 && length(awscc_ssmguiconnect_preferences.remote_desktop) == 0
-    error_message = "JIT node access and recording must be opt-in."
+    condition = (
+      length(awscc_ssmquicksetup_configuration_manager.unified_console) == 0 &&
+      length(awscc_ssmquicksetup_configuration_manager.jit_node_access) == 0 &&
+      length(awscc_ssmguiconnect_preferences.remote_desktop) == 0 &&
+      output.unified_console_quicksetup_manager_arn == ""
+    )
+    error_message = "Unified console, JIT node access, and recording must be opt-in."
+  }
+}
+
+run "preserve_literal_policy_input_braces" {
+  command = plan
+
+  variables {
+    settings = {
+      allowed_iam_role_arns = ["arn:aws:iam::123456789012:role/team&{logs}/writer"]
+      bucket                = { name = "ssm-audit-policy-example" }
+      fleet_manager = {
+        enabled            = true
+        resource_data_sync = { enabled = true, prefix = "inventory&{logs}" }
+      }
+    }
+  }
+
+  override_data {
+    target = data.aws_iam_policy_document.session_encryption
+    values = {
+      json = <<-EOT
+        {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Action": "kms:Encrypt",
+            "Resource": "*",
+            "Principal": { "AWS": "arn:aws:iam::123456789012:role/team&~{logs}/writer" }
+          }]
+        }
+      EOT
+    }
+  }
+
+  assert {
+    condition = (
+      one(one([for statement in data.aws_iam_policy_document.audit_bucket.statement : statement if statement.sid == "SSMBucketDelivery"]).resources) ==
+      "arn:aws:s3:::ssm-audit-policy-example/inventory&~{logs}/*/accountid=123456789012/*" &&
+      one(one([for statement in data.aws_iam_policy_document.session_encryption[0].statement : statement if statement.sid == "AllowIAMRolesAccess"]).principals).identifiers ==
+      toset(["arn:aws:iam::123456789012:role/team&~{logs}/writer"]) &&
+      one(jsondecode(aws_kms_key.this[0].policy).Statement).Principal.AWS == "arn:aws:iam::123456789012:role/team&{logs}/writer"
+    )
+    error_message = "A literal ampersand followed by an opening brace must survive policy document rendering in configured paths and prefixes."
+  }
+}
+
+run "host_management_grants_s3_only_without_optional_logging" {
+  command = plan
+
+  variables {
+    settings = {
+      bucket = { name = "ssm-audit-policy-example" }
+      kms    = { enabled = false }
+      fleet_manager = {
+        enabled                 = true
+        default_host_management = { enabled = true }
+      }
+    }
+  }
+
+  assert {
+    condition = {
+      for statement in data.aws_iam_policy_document.default_host_management_session_logging[0].statement :
+      statement.sid => { actions = statement.actions, resources = statement.resources }
+      } == {
+      WriteSessionLogsToAuditBucket = {
+        actions   = toset(["s3:PutObject"])
+        resources = toset(["arn:aws:s3:::ssm-audit-policy-example/*"])
+      }
+      ReadAuditBucketEncryptionConfiguration = {
+        actions   = toset(["s3:GetEncryptionConfiguration"])
+        resources = toset(["arn:aws:s3:::ssm-audit-policy-example"])
+      }
+    }
+    error_message = "The default host management role must scope S3 actions and omit KMS and CloudWatch grants when disabled."
+  }
+}
+
+run "host_management_grants_kms_and_cloudwatch_when_enabled" {
+  command = plan
+
+  variables {
+    settings = {
+      bucket     = { name = "ssm-audit-policy-example" }
+      cloudwatch = { enabled = true }
+      fleet_manager = {
+        enabled                 = true
+        default_host_management = { enabled = true }
+      }
+    }
+  }
+
+  assert {
+    condition = {
+      for statement in data.aws_iam_policy_document.default_host_management_session_logging[0].statement :
+      statement.sid => { actions = statement.actions, resources = statement.resources }
+      if !contains(["WriteSessionLogsToAuditBucket", "ReadAuditBucketEncryptionConfiguration"], statement.sid)
+      } == {
+      UseSessionEncryptionKey = {
+        actions   = toset(["kms:Decrypt", "kms:GenerateDataKey"])
+        resources = toset(["arn:aws:kms:us-east-1:123456789012:key/mock"])
+      }
+      WriteSessionLogsToCloudWatch = {
+        actions   = toset(["logs:CreateLogStream", "logs:DescribeLogStreams", "logs:PutLogEvents"])
+        resources = toset(["arn:aws:logs:us-east-1:123456789012:log-group:/aws/ssm/mock:*"])
+      }
+      DiscoverSessionLogGroup = {
+        actions   = toset(["logs:DescribeLogGroups"])
+        resources = toset(["*"])
+      }
+    }
+    error_message = "The default host management role must add scoped KMS and CloudWatch stream access and discover log groups."
   }
 }
 
@@ -78,13 +219,38 @@ run "enable_jit_without_recording" {
 
   assert {
     condition = (
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).type == "AWSQuickSetupType-SSM" &&
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters == tomap({
+        AgentUpdateSchedule         = "rate(14 days)"
+        EnableDHMCSchedule          = "rate(1 day)"
+        InventoryCollectionSchedule = "rate(12 hours)"
+        HomeRegion                  = "us-east-1"
+        TargetAccounts              = "123456789012"
+        TargetRegions               = "us-east-1"
+      })
+    )
+    error_message = "The local unified console must use the AWS default schedules and omit an unspecified delegated account."
+  }
+
+  assert {
+    condition = toset(keys(aws_iam_role_policy_attachment.jit_node_access_execution)) == toset([
+      "arn:aws:iam::aws:policy/AWSQuickSetupDeploymentRolePolicy",
+      "arn:aws:iam::aws:policy/AWSQuickSetupJITNADeploymentRolePolicy",
+      "arn:aws:iam::aws:policy/AWSQuickSetupSSMDeploymentRolePolicy",
+      "arn:aws:iam::aws:policy/AWSQuickSetupSSMDeploymentS3BucketRolePolicy",
+    ])
+    error_message = "The shared execution role must grant deployment permissions for JIT and the unified console."
+  }
+
+  assert {
+    condition = (
       length(aws_ssm_service_setting.default_host_management) == 0 &&
       length(aws_ssm_association.inventory) == 0 &&
       length(aws_ssmquicksetup_configuration_manager.host) == 0 &&
       length(aws_ssmquicksetup_configuration_manager.patch) == 0 &&
       length(aws_ssmquicksetup_configuration_manager.dhmc) == 0
     )
-    error_message = "Enabling JIT alone must leave host management, inventory and patching available to another owner."
+    error_message = "JIT must leave the separate host management, inventory, and patch resources disabled by default."
   }
 
   assert {
@@ -109,6 +275,7 @@ run "enable_jit_for_organization" {
 
   variables {
     settings = {
+      organization = { account_id = "234567890123" }
       fleet_manager = {
         enabled = true
         remote_desktop = {
@@ -120,6 +287,7 @@ run "enable_jit_for_organization" {
             target_regions              = "us-east-1,us-west-2"
             home_region                 = "us-west-2"
             identity_provider           = "SSO"
+            delegated_account_id        = "345678901234"
           }
         }
       }
@@ -133,13 +301,27 @@ run "enable_jit_for_organization" {
 
   assert {
     condition = one(awscc_ssmquicksetup_configuration_manager.jit_node_access[0].configuration_definitions).parameters == tomap({
-      DelegatedAccountId        = "123456789012"
+      DelegatedAccountId        = "345678901234"
       HomeRegion                = "us-west-2"
       IdentityProviderSetting   = "SSO"
       TargetOrganizationalUnits = "ou-abcd-11111111"
       TargetRegions             = "us-east-1,us-west-2"
     })
     error_message = "Organization JIT must use the requested OU, Regions, and SSO identity provider."
+  }
+
+  assert {
+    condition = (
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters == tomap({
+        AgentUpdateSchedule         = "rate(14 days)"
+        EnableDHMCSchedule          = "rate(1 day)"
+        InventoryCollectionSchedule = "rate(12 hours)"
+        HomeRegion                  = "us-west-2"
+        TargetOrganizationalUnits   = "r-abcd"
+        TargetRegions               = "us-east-1,us-west-2"
+      })
+    )
+    error_message = "The organization console must send the AWS default schedules and omit DelegatedAccountId even when organization and JIT account IDs are configured."
   }
 }
 
@@ -148,6 +330,7 @@ run "record_with_standalone_jit_settings" {
 
   variables {
     settings = {
+      bucket = { name = "ssm-audit-policy-example" }
       fleet_manager = {
         enabled = true
         remote_desktop = {
@@ -161,6 +344,33 @@ run "record_with_standalone_jit_settings" {
   assert {
     condition     = length(awscc_ssmquicksetup_configuration_manager.jit_node_access) == 1 && length(awscc_ssmguiconnect_preferences.remote_desktop) == 1
     error_message = "Canonical JIT settings must satisfy the recording prerequisite."
+  }
+
+  assert {
+    condition = (
+      one(data.aws_iam_policy_document.audit_bucket.statement).actions == toset(["s3:PutObject"]) &&
+      one(data.aws_iam_policy_document.audit_bucket.statement).resources == toset([
+        "arn:aws:s3:::ssm-audit-policy-example",
+        "arn:aws:s3:::ssm-audit-policy-example/*",
+      ]) &&
+      one(one(data.aws_iam_policy_document.audit_bucket.statement).principals).identifiers == toset(["ssm-guiconnect.amazonaws.com"]) &&
+      one(one(data.aws_iam_policy_document.audit_bucket.statement).condition).variable == "aws:SourceAccount" &&
+      toset(one(one(data.aws_iam_policy_document.audit_bucket.statement).condition).values) == toset(["123456789012"])
+    )
+    error_message = "The audit bucket policy must scope recording writes to GUI Connect and the current account."
+  }
+
+  assert {
+    condition = {
+      for condition in one([
+        for statement in data.aws_iam_policy_document.session_encryption[0].statement : statement
+        if statement.sid == "AllowGuiConnectRecordingAccessViaS3"
+      ]).condition : condition.variable => { test = condition.test, values = toset(condition.values) }
+      } == {
+      "aws:SourceAccount" = { test = "StringEquals", values = toset(["123456789012"]) }
+      "kms:ViaService"    = { test = "StringLike", values = toset(["s3.us-east-1.amazonaws.com"]) }
+    }
+    error_message = "The audit key policy must restrict the recording grant to the current account and calls through S3."
   }
 }
 
@@ -245,7 +455,8 @@ run "delegation_leaves_jit_disabled" {
         account_id = "123456789012"
       }
       fleet_manager = {
-        enabled = true
+        enabled         = true
+        unified_console = { enabled = true }
         remote_desktop = {
           just_in_time_node_access = { enabled = true }
         }
@@ -254,8 +465,12 @@ run "delegation_leaves_jit_disabled" {
   }
 
   assert {
-    condition     = length(aws_organizations_delegated_administrator.this) == 1 && length(awscc_ssmquicksetup_configuration_manager.jit_node_access) == 0
-    error_message = "Delegation mode must only register the administrator."
+    condition = (
+      length(aws_organizations_delegated_administrator.this) == 1 &&
+      length(awscc_ssmquicksetup_configuration_manager.jit_node_access) == 0 &&
+      length(awscc_ssmquicksetup_configuration_manager.unified_console) == 0
+    )
+    error_message = "Delegation mode must register the administrator and skip console and JIT configuration."
   }
 }
 
@@ -367,4 +582,391 @@ run "enable_jit_with_existing_deployment_roles" {
     )
     error_message = "Single-account deployment must pass the configured Quick Setup role identifiers."
   }
+}
+
+run "use_existing_unified_console" {
+  command = plan
+
+  variables {
+    settings = {
+      fleet_manager = {
+        enabled         = true
+        unified_console = { enabled = false }
+        remote_desktop = {
+          just_in_time_node_access = { enabled = true }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      length(awscc_ssmquicksetup_configuration_manager.jit_node_access) == 1 &&
+      length(awscc_ssmquicksetup_configuration_manager.unified_console) == 0 &&
+      output.unified_console_quicksetup_manager_arn == "" &&
+      length(awscc_iam_role_policy.console_diagnosis_untag) == 0 &&
+      toset(keys(aws_iam_role_policy_attachment.jit_node_access_execution)) == toset([
+        "arn:aws:iam::aws:policy/AWSQuickSetupDeploymentRolePolicy",
+        "arn:aws:iam::aws:policy/AWSQuickSetupJITNADeploymentRolePolicy",
+      ])
+    )
+    error_message = "An explicit console opt-out must leave the existing console external and preserve JIT deployment."
+  }
+}
+
+run "enable_unified_console_without_jit" {
+  command = plan
+
+  variables {
+    settings = {
+      fleet_manager = {
+        enabled = true
+        unified_console = {
+          enabled                       = true
+          delegated_account_id          = null
+          agent_update_schedule         = "none"
+          enable_dhmc_schedule          = "none"
+          inventory_collection_schedule = "rate(1 day)"
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      length(awscc_ssmquicksetup_configuration_manager.unified_console) == 1 &&
+      length(awscc_ssmquicksetup_configuration_manager.jit_node_access) == 0 &&
+      toset(keys(aws_iam_role_policy_attachment.jit_node_access_execution)) == toset([
+        "arn:aws:iam::aws:policy/AWSQuickSetupDeploymentRolePolicy",
+        "arn:aws:iam::aws:policy/AWSQuickSetupSSMDeploymentRolePolicy",
+      ])
+    )
+    error_message = "A standalone console must deploy with console permissions and no JIT resources or policy."
+  }
+
+  assert {
+    condition = (
+      awscc_iam_role_policy.console_diagnosis_untag[0].role_name == aws_iam_role.jit_node_access_execution[0].name &&
+      awscc_iam_role_policy.console_diagnosis_untag[0].policy_document == data.aws_iam_policy_document.console_diagnosis_tagging[0].json &&
+      coalesce(one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).effect, "Allow") == "Allow" &&
+      one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).actions == toset(["iam:TagRole", "iam:UntagRole"]) &&
+      one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).resources == toset(["arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1"])
+    )
+    error_message = "A standalone console must grant its execution role only TagRole and UntagRole on the local diagnosis role."
+  }
+
+  assert {
+    condition = one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters == tomap({
+      AgentUpdateSchedule         = "none"
+      EnableDHMCSchedule          = "none"
+      InventoryCollectionSchedule = "rate(1 day)"
+      HomeRegion                  = "us-east-1"
+      TargetAccounts              = "123456789012"
+      TargetRegions               = "us-east-1"
+    })
+    error_message = "The unified console must preserve explicit off and custom schedules and omit a null delegated account."
+  }
+}
+
+run "scope_console_diagnosis_tagging_to_exact_account_and_regions" {
+  command = plan
+
+  variables {
+    settings = {
+      fleet_manager = {
+        enabled = true
+        unified_console = {
+          organization_root_id = "r-wxyz"
+          target_regions       = "us-east-1,us-west-2,us-east-1"
+        }
+        remote_desktop = {
+          just_in_time_node_access = {
+            enabled                     = true
+            organization_level          = true
+            target_organizational_units = "ou-abcd-11111111"
+            target_regions              = "us-east-1,us-west-2"
+            home_region                 = "eu-west-1"
+            delegated_account_id        = "345678901234"
+            execution_role_name         = "shared-console-execution"
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = awscc_iam_role_policy.console_diagnosis_untag[0].role_name == "shared-console-execution"
+    error_message = "The diagnosis role tagging policy must attach to the configured shared execution role."
+  }
+
+  assert {
+    condition = (
+      awscc_iam_role_policy.console_diagnosis_untag[0].policy_document == data.aws_iam_policy_document.console_diagnosis_tagging[0].json &&
+      coalesce(data.aws_iam_policy_document.console_diagnosis_tagging[0].version, "2012-10-17") == "2012-10-17" &&
+      coalesce(one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).effect, "Allow") == "Allow" &&
+      one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).actions == toset(["iam:TagRole", "iam:UntagRole"]) &&
+      one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).resources == toset([
+        "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-eu-west-1",
+        "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1",
+        "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-west-2",
+      ]) &&
+      length(one(data.aws_iam_policy_document.console_diagnosis_tagging[0].statement).condition) == 0
+    )
+    error_message = "The policy must allow only TagRole and UntagRole for the deployment account's exact diagnosis roles in the home and target Regions."
+  }
+}
+
+run "reject_wildcard_console_diagnosis_region" {
+  command = plan
+
+  variables {
+    settings = {
+      fleet_manager = {
+        enabled = true
+        unified_console = {
+          organization_root_id = "r-wxyz"
+          target_regions       = "us-east-1,*"
+        }
+        remote_desktop = {
+          just_in_time_node_access = {
+            enabled                     = true
+            organization_level          = true
+            target_organizational_units = "ou-abcd-11111111"
+            target_regions              = "us-east-1"
+          }
+        }
+      }
+    }
+  }
+
+  expect_failures = [awscc_iam_role_policy.console_diagnosis_untag]
+}
+
+run "reject_unified_console_missing_jit_region" {
+  command = plan
+
+  variables {
+    settings = {
+      fleet_manager = {
+        enabled = true
+        unified_console = {
+          organization_root_id = "r-wxyz"
+          target_regions       = "us-east-1"
+        }
+        remote_desktop = {
+          just_in_time_node_access = {
+            enabled                     = true
+            organization_level          = true
+            create_deployment_roles     = false
+            target_organizational_units = "ou-abcd-11111111"
+            target_regions              = "us-east-1,us-west-2"
+          }
+        }
+      }
+    }
+  }
+
+  expect_failures = [awscc_ssmquicksetup_configuration_manager.unified_console]
+}
+
+run "preserve_imported_organization_console_settings" {
+  command = plan
+
+  variables {
+    settings = {
+      fleet_manager = {
+        enabled = true
+        unified_console = {
+          name                  = "existing-unified-console"
+          description           = "Existing organization configuration"
+          type_version          = "1.0"
+          organization_root_id  = "r-wxyz"
+          delegated_account_id  = "456789012345"
+          target_regions        = "us-east-1,us-west-2,eu-west-1"
+          additional_parameters = { ExistingSetting = "preserved" }
+        }
+        remote_desktop = {
+          just_in_time_node_access = {
+            enabled                     = true
+            organization_level          = true
+            create_deployment_roles     = false
+            administration_role_name    = "existing-quicksetup-admin"
+            execution_role_name         = "existing-quicksetup-execution"
+            target_organizational_units = "ou-abcd-11111111"
+            target_regions              = "us-east-1,us-west-2"
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      length(data.aws_organizations_organization.unified_console) == 0 &&
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters["TargetOrganizationalUnits"] == "r-wxyz" &&
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters["TargetRegions"] == "us-east-1,us-west-2,eu-west-1"
+    )
+    error_message = "Explicit root and wider console Region coverage must be accepted without a root lookup."
+  }
+
+  assert {
+    condition = (
+      awscc_ssmquicksetup_configuration_manager.unified_console[0].name == "existing-unified-console" &&
+      awscc_ssmquicksetup_configuration_manager.unified_console[0].description == "Existing organization configuration" &&
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).type_version == "1.0" &&
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters["ExistingSetting"] == "preserved" &&
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters["DelegatedAccountId"] == "456789012345"
+    )
+    error_message = "Adoption must preserve the console's name, description, version, explicit delegated account, and additional parameters."
+  }
+
+  assert {
+    condition = (
+      length(aws_iam_role.jit_node_access_administration) == 0 &&
+      length(aws_iam_role.jit_node_access_execution) == 0 &&
+      length(awscc_iam_role_policy.console_diagnosis_untag) == 0 &&
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).local_deployment_administration_role_arn == "arn:aws:iam::123456789012:role/existing-quicksetup-admin" &&
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).local_deployment_execution_role_name == "existing-quicksetup-execution"
+    )
+    error_message = "An imported organization console must retain explicitly configured external deployment roles."
+  }
+}
+
+run "reject_single_account_console_in_another_region" {
+  command = plan
+
+  variables {
+    settings = {
+      fleet_manager = {
+        enabled = true
+        unified_console = {
+          enabled        = true
+          target_regions = "us-east-1,us-west-2"
+        }
+      }
+    }
+  }
+
+  expect_failures = [awscc_ssmquicksetup_configuration_manager.unified_console]
+}
+
+run "use_separate_console_deployment_roles" {
+  command = plan
+
+  variables {
+    settings = {
+      fleet_manager = {
+        enabled = true
+        unified_console = {
+          deployment_roles = {
+            administration_role_arn = "arn:aws:iam::123456789012:role/existing-console-admin"
+            execution_role_name     = "existing-console-execution"
+          }
+        }
+        remote_desktop = {
+          just_in_time_node_access = {
+            enabled                  = true
+            administration_role_name = "jit-admin"
+            execution_role_name      = "jit-execution"
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).local_deployment_administration_role_arn == "arn:aws:iam::123456789012:role/existing-console-admin" &&
+      one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).local_deployment_execution_role_name == "existing-console-execution" &&
+      one(awscc_ssmquicksetup_configuration_manager.jit_node_access[0].configuration_definitions).local_deployment_administration_role_arn == "arn:aws:iam::123456789012:role/jit-admin" &&
+      one(awscc_ssmquicksetup_configuration_manager.jit_node_access[0].configuration_definitions).local_deployment_execution_role_name == "jit-execution"
+    )
+    error_message = "The imported console and JIT must each use their own deployment roles."
+  }
+
+  assert {
+    condition = (
+      length(awscc_iam_role_policy.console_diagnosis_untag) == 0 &&
+      toset(keys(aws_iam_role_policy_attachment.jit_node_access_execution)) == toset([
+        "arn:aws:iam::aws:policy/AWSQuickSetupDeploymentRolePolicy",
+        "arn:aws:iam::aws:policy/AWSQuickSetupJITNADeploymentRolePolicy",
+      ])
+    )
+    error_message = "Independent console roles must leave the JIT execution role's policy set unchanged."
+  }
+}
+
+run "omit_organization_console_roles_when_jit_manages_roles" {
+  command = plan
+
+  variables {
+    settings = {
+      fleet_manager = {
+        enabled = true
+        unified_console = {
+          deployment_roles     = {}
+          delegated_account_id = "  "
+        }
+        remote_desktop = {
+          just_in_time_node_access = {
+            enabled                     = true
+            organization_level          = true
+            target_organizational_units = "ou-abcd-11111111"
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      local.console_admin_role_arn == null &&
+      local.console_execution_role == null &&
+      length(aws_iam_role.jit_node_access_administration) == 1 &&
+      length(aws_iam_role.jit_node_access_execution) == 1 &&
+      !contains(keys(aws_iam_role_policy_attachment.jit_node_access_execution), "arn:aws:iam::aws:policy/AWSQuickSetupSSMDeploymentRolePolicy")
+    )
+    error_message = "An explicit empty console role override must preserve service-managed console roles and JIT-owned roles."
+  }
+
+  assert {
+    condition     = !contains(keys(one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters), "DelegatedAccountId")
+    error_message = "The unified console must omit a blank delegated account."
+  }
+}
+
+run "reject_partial_unified_console_role_pair" {
+  command = plan
+
+  variables {
+    settings = {
+      fleet_manager = {
+        enabled = true
+        unified_console = {
+          enabled          = true
+          deployment_roles = { execution_role_name = "existing-console-execution" }
+        }
+      }
+    }
+  }
+
+  expect_failures = [awscc_ssmquicksetup_configuration_manager.unified_console]
+}
+
+run "reject_unified_console_additional_target_parameter" {
+  command = plan
+
+  variables {
+    settings = {
+      fleet_manager = {
+        enabled = true
+        unified_console = {
+          enabled               = true
+          additional_parameters = { TargetOrganizationalUnits = "r-wxyz" }
+        }
+      }
+    }
+  }
+
+  expect_failures = [awscc_ssmquicksetup_configuration_manager.unified_console]
 }

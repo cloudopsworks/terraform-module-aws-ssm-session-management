@@ -48,24 +48,26 @@ locals {
   dhmc_session_logging = local.dhmc_create_role && try(var.settings.fleet_manager.default_host_management.session_logging_access, true)
 }
 
+data "aws_iam_policy_document" "default_host_management_trust" {
+  count = local.dhmc_create_role ? 1 : 0
+
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ssm.amazonaws.com"]
+    }
+  }
+}
+
 resource "aws_iam_role" "default_host_management" {
-  count       = local.dhmc_create_role ? 1 : 0
-  name        = local.dhmc_role_name
-  path        = local.dhmc_role_path
-  description = "Default Host Management Configuration role assumed by Systems Manager to manage EC2 instances as managed nodes"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "ssm.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
-  tags = local.all_tags
+  count              = local.dhmc_create_role ? 1 : 0
+  name               = local.dhmc_role_name
+  path               = local.dhmc_role_path
+  description        = "Default Host Management Configuration role assumed by Systems Manager to manage EC2 instances as managed nodes"
+  assume_role_policy = data.aws_iam_policy_document.default_host_management_trust[0].json
+  tags               = local.all_tags
 }
 
 # AmazonSSMManagedEC2InstanceDefaultPolicy is the minimum set Systems Manager needs to
@@ -82,59 +84,55 @@ resource "aws_iam_role_policy_attachment" "default_host_management_additional" {
   policy_arn = each.value
 }
 
-resource "aws_iam_role_policy" "default_host_management_session_logging" {
+data "aws_iam_policy_document" "default_host_management_session_logging" {
   count = local.dhmc_session_logging ? 1 : 0
-  name  = "session-logging"
-  role  = aws_iam_role.default_host_management[0].id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = concat(
-      [
-        {
-          Sid      = "WriteSessionLogsToAuditBucket"
-          Effect   = "Allow"
-          Action   = "s3:PutObject"
-          Resource = "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}/*"
-        },
-        {
-          # Session Manager reads the bucket encryption configuration before writing, to
-          # decide which key to encrypt the log with.
-          Sid      = "ReadAuditBucketEncryptionConfiguration"
-          Effect   = "Allow"
-          Action   = "s3:GetEncryptionConfiguration"
-          Resource = "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
-        }
-      ],
-      local.has_kms_key ? [{
-        Sid    = "UseSessionEncryptionKey"
-        Effect = "Allow"
-        Action = [
-          "kms:Decrypt",
-          "kms:GenerateDataKey"
-        ]
-        Resource = local.kms_key_arn
-      }] : [],
-      local.cloudwatch_enabled ? [{
-        Sid    = "WriteSessionLogsToCloudWatch"
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogStream",
-          "logs:PutLogEvents",
-          "logs:DescribeLogStreams"
-        ]
-        Resource = "${aws_cloudwatch_log_group.this[0].arn}:*"
-      }] : [],
-      local.cloudwatch_enabled ? [{
-        # DescribeLogGroups is a list operation and admits no resource scope. Gated on its
-        # own because its shape differs from the statement above, and a single conditional
-        # returning both has no consistent type with the empty alternative.
-        Sid      = "DiscoverSessionLogGroup"
-        Effect   = "Allow"
-        Action   = "logs:DescribeLogGroups"
-        Resource = "*"
-      }] : []
-    )
-  })
+
+  statement {
+    sid       = "WriteSessionLogsToAuditBucket"
+    actions   = ["s3:PutObject"]
+    resources = ["${local.audit_bucket_arn}/*"]
+  }
+
+  statement {
+    sid       = "ReadAuditBucketEncryptionConfiguration"
+    actions   = ["s3:GetEncryptionConfiguration"]
+    resources = [local.audit_bucket_arn]
+  }
+
+  dynamic "statement" {
+    for_each = local.has_kms_key ? [1] : []
+    content {
+      sid       = "UseSessionEncryptionKey"
+      actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
+      resources = [local.kms_key_arn]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.cloudwatch_enabled ? [1] : []
+    content {
+      sid       = "WriteSessionLogsToCloudWatch"
+      actions   = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
+      resources = ["${aws_cloudwatch_log_group.this[0].arn}:*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.cloudwatch_enabled ? [1] : []
+    content {
+      # DescribeLogGroups is a list operation and requires a wildcard resource.
+      sid       = "DiscoverSessionLogGroup"
+      actions   = ["logs:DescribeLogGroups"]
+      resources = ["*"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "default_host_management_session_logging" {
+  count  = local.dhmc_session_logging ? 1 : 0
+  name   = "session-logging"
+  role   = aws_iam_role.default_host_management[0].id
+  policy = data.aws_iam_policy_document.default_host_management_session_logging[0].json
 }
 
 resource "aws_ssm_service_setting" "default_host_management" {

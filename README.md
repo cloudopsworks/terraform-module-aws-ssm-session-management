@@ -62,8 +62,9 @@ connection. All three name lists accept exact names and
 `settings.create_grant_iam_role_arns` — for roles outside this account that
 cannot be looked up by name.
 
-Under `settings.fleet_manager` the module also configures the Fleet Manager side of Systems Manager.
-All of it is opt-in and account and Region wide:
+Under `settings.fleet_manager` the module configures regional Fleet Manager features, the unified
+Systems Manager console, and just-in-time node access. The console and JIT support single-account
+and organizational deployments.
 
 - **Default Host Management Configuration** creates the service role Systems Manager assumes and flips
   the `/ssm/managed-instance/default-ec2-instance-management-role` service setting, so every EC2
@@ -76,13 +77,15 @@ All of it is opt-in and account and Region wide:
   audit bucket this module already manages and adding the bucket policy and KMS grants the service
   requires.
 
+- **The unified Systems Manager console** uses Quick Setup to aggregate managed nodes across the
+  configured scope.
 - **Just-in-time node access** uses Quick Setup to enable access requests for managed nodes. It can
   be enabled independently of Remote Desktop recording.
 - **Remote Desktop connection recording** records approved Fleet Manager RDP connections to S3. The
   audit bucket uses `BucketOwnerEnforced` so its owner also owns the recordings.
 
-The `awscc` provider manages the Quick Setup configuration for just-in-time node access and the
-optional GUI Connect recording preferences.
+The `awscc` provider manages both Quick Setup configurations for the unified console and JIT,
+along with the optional GUI Connect recording preferences.
 
 **The `awscc` provider has to be configured with the same Region and role as `aws`.** It is a separate
 provider with its own credential and Region resolution, so a Terragrunt `root.hcl` that generates only an
@@ -126,8 +129,9 @@ account, and none of the session logging or Fleet Manager resources.
 
 ## CloudFormation security recommendations for Quick Setup
 
-Quick Setup uses StackSets for Default Host Management, Host Management, Patch Policy and Fleet Manager
-just-in-time node access. Review these Security Hub controls in each target account and Region.
+Quick Setup uses StackSets for Default Host Management, Host Management, Patch Policy, the unified
+Systems Manager console and Fleet Manager just-in-time node access. Review these Security Hub
+controls in each target account and Region.
 
 - **CloudFormation.3 — termination protection.** Enable protection on each root stack after deployment.
   Nested stacks inherit it. Disable protection before removing a target or deleting its configuration.
@@ -135,7 +139,7 @@ just-in-time node access. Review these Security Hub controls in each target acco
 - **CloudFormation.4 — stack service role.** Use a least-privilege service role for stacks you manage directly.
   AWS cannot set the stack's `RoleARN` on service-managed StackSet instances, so these instances fail the
   control even when Quick Setup has a deployment role. Account for this limitation before choosing an
-  organization-wide JIT rollout. [AWS Security Hub control](https://docs.aws.amazon.com/securityhub/latest/userguide/cloudformation-controls.html#cloudformation-4)
+  organization-wide console or JIT rollout. [AWS Security Hub control](https://docs.aws.amazon.com/securityhub/latest/userguide/cloudformation-controls.html#cloudformation-4)
 
 ## Usage
 
@@ -251,15 +255,31 @@ settings:
   #     files: ""                                 # (Optional) JSON string selecting files to inventory. Only sent when non-empty. Default: ""
   #     windows_registry: ""                      # (Optional) JSON string selecting Windows registry keys to inventory. Only sent when non-empty. Default: ""
   #
+  #   unified_console:                           # (Optional) Manage the unified Systems Manager console through Quick Setup.
+  #     enabled: true                          # (Optional) Defaults to whether JIT access is enabled. Set true to keep the console independently or false to use an externally managed console.
+  #     name: ""                               # (Optional) Name of the Quick Setup configuration manager. Defaults to a name derived from the system name.
+  #     description: ""                        # (Optional) Description of the Quick Setup configuration manager.
+  #     target_regions: ""                     # (Optional) Comma-separated target Regions. Defaults to the JIT target Regions or its home Region.
+  #     organization_root_id: ""               # (Optional) Organization root ID, for organization mode only. Discovered automatically when omitted.
+  #     delegated_account_id: ""               # (Optional) Delegated administrator account ID for the unified console. Omitted by default.
+  #     agent_update_schedule: "rate(14 days)"           # (Optional) SSM Agent updates schedule. Defaults to rate(14 days). Set to "none" to disable.
+  #     enable_dhmc_schedule: "rate(1 day)"              # (Optional) Default Host Management Configuration schedule. Defaults to rate(1 day). Set to "none" to disable.
+  #     inventory_collection_schedule: "rate(12 hours)"  # (Optional) Inventory collection schedule. Defaults to rate(12 hours). Set to "none" to disable.
+  #     type_version: ""                       # (Optional) Quick Setup type version. Omit to use the provider or AWS default.
+  #     additional_parameters: {}              # (Optional) Extra string parameters from the Quick Setup configuration definition.
+  #     deployment_roles:                     # (Optional) Supply a separate existing role pair. Omit to share JIT roles, or set {} to omit both roles for an organization deployment.
+  #       administration_role_arn: ""         # (Required for a role pair) ARN of the existing local StackSet administration role.
+  #       execution_role_name: ""             # (Required for a role pair) Name of the existing local StackSet execution role with AWSQuickSetupSSMDeploymentRolePolicy.
+  #
   #   remote_desktop:                           # (Optional) Fleet Manager Remote Desktop access and recording settings.
-  #     just_in_time_node_access:             # (Optional) Enable just-in-time node access for Fleet Manager through Quick Setup. Requires the unified Systems Manager console.
+  #     just_in_time_node_access:             # (Optional) Enable just-in-time node access for Fleet Manager through Quick Setup. Enables the unified console by default.
   #       enabled: false                      # (Optional) Set up just-in-time node access with or without recording. Required when recording is enabled. Default: false
   #       organization_level: false           # (Optional) Set it up across organizational units rather than for this account alone. When true the module must be applied from the Systems Manager delegated administrator account and target_organizational_units is required; when false it targets target_accounts instead. Default: false
   #       target_organizational_units: ""     # (Required when organization_level is true) Comma separated organizational unit IDs, or the organization root ID. Not sent when organization_level is false.
   #       target_accounts: ""                 # (Optional, organization_level false only) Comma separated account IDs. Not sent when organization_level is true. Default: "" (the account this module is applied in)
   #       target_regions: ""                  # (Optional) Comma separated Regions to enable it in. Must match, or be a subset of, the unified console target Regions. Default: "" (the Region this module is applied in)
-  #       home_region: ""                     # (Optional) Region the unified Systems Manager console aggregates into. Default: "" (the Region this module is applied in)
-  #       delegated_account_id: ""            # (Optional) Account ID of the Systems Manager delegated administrator. Default: "" (settings.organization.account_id when set, otherwise the current account)
+  #       home_region: ""                     # (Optional) Console home Region. Configure awscc in this Region to create or import the managers. Defaults to the aws provider Region.
+  #       delegated_account_id: ""            # (Optional) Delegated administrator account ID for JIT. Default: "" (settings.organization.account_id when set, otherwise the current account)
   #       identity_provider: "IAM"            # (Optional) Where the approver identity behind an access request is read from. Values: IAM, SSO. Default: "IAM"
   #       name: ""                            # (Optional) Name of the Quick Setup configuration manager. Default: "" ("<system-name>-jitna")
   #       create_deployment_roles: true       # (Optional) Create the Quick Setup local deployment roles. Set to false when Quick Setup already created them here, since IAM rejects a duplicate role name. An organization level setup then sends no role at all, which AWS permits; a single account setup always sends them, because AWS requires them there. Default: true
@@ -595,15 +615,125 @@ settings:
       files: '[{"Path":"/usr/bin","Pattern":["*ssm*"],"Recursive":false}]'
 ```
 
+### Unified Systems Manager console
+
+When you enable just-in-time node access, the module also manages the unified console through an
+`AWSQuickSetupType-SSM` configuration manager. Use `settings.fleet_manager.unified_console.enabled: true`
+to manage the console independently of JIT. Use `false` when a separate deployment owns the console
+and already covers the JIT target accounts and Regions.
+
+Set the `awscc` provider Region to the console home Region for creation and import. The console and
+JIT share the deployment mode and `home_region` under `settings.fleet_manager.remote_desktop.just_in_time_node_access`.
+When the module manages both configurations, `depends_on` orders the unified console manager
+before the JIT manager. Quick Setup can still be deploying StackSets when JIT setup starts.
+If AWS reports that console setup is still in progress, retry after the deployment finishes.
+For a single account, use the current account and set the target Region to the home Region. For an
+organization, enable trusted access for Systems Manager, Quick Setup, CloudFormation StackSets and
+AWS Resource Explorer in AWS Organizations, register delegated administrators, and apply from the Systems Manager
+delegated administrator account. The console targets the organization root, which
+the module discovers unless you supply `unified_console.organization_root_id`. JIT can target
+selected OUs and a subset of the console Regions. [AWS CloudFormation example](https://github.com/aws-samples/cloud-operations-best-practices/blob/main/cloud-operations-best-practices/static/cfn-templates/just-in-time-node-access/just-in-time-quick-setup-cfn-template.yaml)
+
+By default, the console checks for SSM Agent updates every 14 days, enables Default Host
+Management Configuration daily and collects Inventory every 12 hours. When SSM Compliance
+Management or another deployment owns one of these tasks for the same nodes, set the corresponding
+console schedule to `"none"`. [AWS console setup defaults](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-setting-up-single-account-region.html)
+
+The module adds `AWSQuickSetupSSMDeploymentRolePolicy` to the
+shared execution role when it creates the role. When JIT and the console share this module-managed
+role, the module also attaches `AWSQuickSetupSSMDeploymentS3BucketRolePolicy` so CloudFormation
+can manage `do-not-delete-ssm-*` buckets in the deployment account.
+[AWS managed policy](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AWSQuickSetupSSMDeploymentS3BucketRolePolicy.html)
+
+Omit `unified_console.deployment_roles` to share
+the JIT role configuration. If the console already uses a different role pair, set
+`unified_console.deployment_roles.administration_role_arn` and `execution_role_name` to the existing
+values. For an organization manager that was deployed with both fields omitted, set
+`unified_console.deployment_roles: {}` to preserve that configuration. Attach
+`AWSQuickSetupSSMDeploymentRolePolicy` in the role's owning stack when the execution role already
+exists, including when using a different role pair for the console.
+
+#### Recover from a diagnosis role tagging failure
+
+A console StackSet can report `UnauthorizedTaggingOperation` when adding or removing tags on
+an `AWS-SSM-DiagnosisAdminRole`. The AWS managed deployment policy allows `iam:TagRole` only
+under specific tag and request conditions. The module grants both `iam:TagRole` and
+`iam:UntagRole` to the shared **StackSet execution role** it manages, scoped to the exact
+diagnosis admin role ARNs in the current account's home and target Regions.
+If the execution role named in the error is managed elsewhere, add this statement in its
+owning stack. Substitute the diagnosis role ARN from the failed account and Region.
+[AWS Quick Setup SSM deployment policy](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AWSQuickSetupSSMDeploymentRolePolicy.html)
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["iam:TagRole", "iam:UntagRole"],
+  "Resource": "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1"
+}
+```
+
+After the grant takes effect, open **Systems Manager → Diagnose and remediate → Deployment issues**,
+select the failed deployment and choose **Redeploy**. Wait for the deployment to succeed before
+retrying JIT. [AWS deployment recovery procedure](https://docs.aws.amazon.com/systems-manager/latest/userguide/remediating-deployment-issues.html)
+
+#### Adopt an existing unified console before the first apply
+
+**Before upgrading a deployment with JIT enabled**, check for a console manager in the home Region.
+If the console will stay under external ownership, set `unified_console.enabled: false` before
+planning. To adopt the existing console, first confirm its current owner and coordinate the state
+transfer so only one state manages the manager. Keep console management enabled in this module
+during import.
+
+List managers while authenticated to the account that owns the console. Use the console home
+Region and copy the full `ManagerArn` for the `AWSQuickSetupType-SSM` manager.
+
+```sh
+aws ssm-quicksetup list-configuration-managers --region us-east-1 \
+  --query "ConfigurationManagersList[?contains(ConfigurationDefinitionSummaries[].Type, 'AWSQuickSetupType-SSM')].{Name:Name,ManagerArn:ManagerArn}"
+
+manager_arn='arn:aws:ssm-quicksetup:us-east-1:123456789012:configuration-manager/01234567-89ab-cdef-0123-456789abcdef'
+aws ssm-quicksetup get-configuration-manager --region us-east-1 --manager-arn "$manager_arn"
+```
+
+The `Deployment` entry under `StatusSummaries` shows the progress of the console rollout.
+Match the existing manager's name, description, tags, deployment roles, target root or account,
+target Regions and schedules in the inputs. If its parameters include `DelegatedAccountId`, set
+`unified_console.delegated_account_id` to that value. Otherwise, leave it unset. The console omits
+this parameter by default in both single-account and organization deployments.
+Use `unified_console.type_version` and
+`unified_console.additional_parameters` to retain the existing version and additional parameters
+where needed. Reuse existing deployment roles through their owning stack.
+[AWS CLI manager details](https://docs.aws.amazon.com/cli/latest/reference/ssm-quicksetup/get-configuration-manager.html)
+
+From the Terragrunt unit that uses this module as its source, import the manager using its full ARN.
+
+```sh
+terragrunt run -- import 'awscc_ssmquicksetup_configuration_manager.unified_console[0]' "$manager_arn"
+```
+
+For a Terraform root module calling this module as `module "ssm_session"`, use the corresponding
+module address.
+
+```sh
+terraform import 'module.ssm_session.awscc_ssmquicksetup_configuration_manager.unified_console[0]' "$manager_arn"
+```
+
+Review the next plan for unintended updates, creation of a second manager, or replacement of the
+imported manager. Keep the console enabled while this state owns it. If you disable JIT, set
+`unified_console.enabled: true` first to retain the console independently. Turning off JIT with
+the console setting omitted, or explicitly disabling the console while it is in state, schedules
+the manager's deletion. To transfer ownership without
+deleting the console, remove its binding from the old state and import it into the new state.
+[AWSCC provider import format](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmquicksetup_configuration_manager#import)
+
 ### Just-in-time access for Fleet Manager Remote Desktop
 
 Enable just-in-time node access to request temporary access to managed Windows nodes through
 Fleet Manager. It works independently of the SSM Compliance Management module. AWS bills for
 just-in-time node access after its 30-day trial.
 
-The unified Systems Manager console must already cover the target accounts and Regions. In an
-AWS Organization, configure the unified console through its delegated administrator. Set
-`home_region` to the unified console's home Region if it differs from the provider Region.
+The unified console must cover the JIT targets. Follow the adoption instructions above if the
+console already exists. Set `home_region` and the `awscc` provider to the console's home Region.
 [AWS setup and IAM permissions](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-just-in-time-node-access-setting-up.html)
 
 The following configuration enables just-in-time access with recording left at its default.
@@ -983,14 +1113,25 @@ Available targets:
 | [aws_ssmquicksetup_configuration_manager.dhmc](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [aws_ssmquicksetup_configuration_manager.host](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [aws_ssmquicksetup_configuration_manager.patch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
+| [awscc_iam_role_policy.console_diagnosis_untag](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/iam_role_policy) | resource |
 | [awscc_ssmguiconnect_preferences.remote_desktop](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmguiconnect_preferences) | resource |
 | [awscc_ssmquicksetup_configuration_manager.jit_node_access](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
+| [awscc_ssmquicksetup_configuration_manager.unified_console](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [random_string.random](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_iam_policy_document.audit_bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.console_diagnosis_tagging](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.default_host_management_session_logging](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.default_host_management_trust](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.jit_administration_trust](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.jit_assume_execution_role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.jit_execution_trust](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.session_encryption](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_role.allowed](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_role) | data source |
 | [aws_iam_roles.allowed_wildcard](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_roles) | data source |
 | [aws_kms_alias.existing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_alias) | data source |
 | [aws_kms_key.existing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_key) | data source |
+| [aws_organizations_organization.unified_console](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/organizations_organization) | data source |
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 | [aws_ssm_patch_baselines.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_patch_baselines) | data source |
@@ -1040,6 +1181,7 @@ Available targets:
 | <a name="output_resource_data_sync_prefix"></a> [resource\_data\_sync\_prefix](#output\_resource\_data\_sync\_prefix) | Key prefix under which resource data sync writes Inventory data. Empty when resource data sync is disabled or writes to the bucket root. |
 | <a name="output_session_document_arn"></a> [session\_document\_arn](#output\_session\_document\_arn) | ARN of the SSM Session document holding the regional Session Manager preferences. Empty in delegation mode. |
 | <a name="output_session_document_name"></a> [session\_document\_name](#output\_session\_document\_name) | Name of the SSM Session document holding the regional Session Manager preferences. Empty in delegation mode. |
+| <a name="output_unified_console_quicksetup_manager_arn"></a> [unified\_console\_quicksetup\_manager\_arn](#output\_unified\_console\_quicksetup\_manager\_arn) | ARN of the unified Systems Manager console configuration manager. Empty when this module does not manage the console. |
 
 
 

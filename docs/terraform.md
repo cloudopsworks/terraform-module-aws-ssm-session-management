@@ -47,14 +47,25 @@
 | [aws_ssmquicksetup_configuration_manager.dhmc](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [aws_ssmquicksetup_configuration_manager.host](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [aws_ssmquicksetup_configuration_manager.patch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
+| [awscc_iam_role_policy.console_diagnosis_untag](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/iam_role_policy) | resource |
 | [awscc_ssmguiconnect_preferences.remote_desktop](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmguiconnect_preferences) | resource |
 | [awscc_ssmquicksetup_configuration_manager.jit_node_access](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
+| [awscc_ssmquicksetup_configuration_manager.unified_console](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [random_string.random](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_iam_policy_document.audit_bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.console_diagnosis_tagging](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.default_host_management_session_logging](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.default_host_management_trust](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.jit_administration_trust](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.jit_assume_execution_role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.jit_execution_trust](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.session_encryption](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_role.allowed](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_role) | data source |
 | [aws_iam_roles.allowed_wildcard](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_roles) | data source |
 | [aws_kms_alias.existing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_alias) | data source |
 | [aws_kms_key.existing](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_key) | data source |
+| [aws_organizations_organization.unified_console](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/organizations_organization) | data source |
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 | [aws_ssm_patch_baselines.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_patch_baselines) | data source |
@@ -104,3 +115,4 @@
 | <a name="output_resource_data_sync_prefix"></a> [resource\_data\_sync\_prefix](#output\_resource\_data\_sync\_prefix) | Key prefix under which resource data sync writes Inventory data. Empty when resource data sync is disabled or writes to the bucket root. |
 | <a name="output_session_document_arn"></a> [session\_document\_arn](#output\_session\_document\_arn) | ARN of the SSM Session document holding the regional Session Manager preferences. Empty in delegation mode. |
 | <a name="output_session_document_name"></a> [session\_document\_name](#output\_session\_document\_name) | Name of the SSM Session document holding the regional Session Manager preferences. Empty in delegation mode. |
+| <a name="output_unified_console_quicksetup_manager_arn"></a> [unified\_console\_quicksetup\_manager\_arn](#output\_unified\_console\_quicksetup\_manager\_arn) | ARN of the unified Systems Manager console configuration manager. Empty when this module does not manage the console. |

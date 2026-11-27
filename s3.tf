@@ -33,120 +33,127 @@ locals {
 
   s3_kms_key_arn = local.has_kms_key ? local.kms_key_arn : "arn:${data.aws_partition.current.partition}:kms:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:alias/aws/s3"
 
-  # Two independent reasons to attach a bucket policy, so the statements are assembled as a
-  # list and the policy is only attached when at least one of them applies.
-  bucket_policy_statements = concat(
-    local.has_allowed_iam_roles ? [{
-      Sid    = "AllowIAMRolesAccess"
-      Effect = "Allow"
-      Principal = {
-        AWS = local.allowed_iam_role_arns
+  audit_bucket_arn = "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
+  audit_bucket_and_objects = [
+    local.audit_bucket_arn,
+    "${local.audit_bucket_arn}/*",
+  ]
+
+  attach_bucket_policy = (
+    local.has_allowed_iam_roles ||
+    local.has_admin_iam_roles ||
+    local.resource_data_sync_uses_audit_bucket ||
+    local.rdp_recording_uses_audit_bucket
+  )
+}
+
+data "aws_iam_policy_document" "audit_bucket" {
+  dynamic "statement" {
+    for_each = local.has_allowed_iam_roles ? [1] : []
+    content {
+      sid       = "AllowIAMRolesAccess"
+      actions   = ["s3:PutObject", "s3:GetEncryptionConfiguration"]
+      resources = local.audit_bucket_and_objects
+
+      principals {
+        type        = "AWS"
+        identifiers = local.allowed_role_principals
       }
-      Action = [
-        "s3:PutObject",
-        "s3:GetEncryptionConfiguration",
-      ]
-      Resource = [
-        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}/*",
-        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
-      ]
-    }] : [],
-    # Administrative roles get full object lifecycle on the bucket -- read, create, delete,
-    # multipart and listing -- rather than the write-only pair above, so they can review and
-    # clean up session logs and recordings. Deliberately enumerated rather than "s3:*":
-    # the wildcard also carries s3:PutBucketPolicy, s3:DeleteBucketPolicy, s3:DeleteBucket
-    # and s3:PutEncryptionConfiguration, which would let an audit reader rewrite this very
-    # policy, drop the TLS denies, weaken the bucket's encryption or delete the bucket.
-    local.has_admin_iam_roles ? [{
-      Sid    = "AllowIAMAdminRolesAccess"
-      Effect = "Allow"
-      Principal = {
-        AWS = local.admin_iam_role_arns
-      }
-      Action = [
-        # Read
+    }
+  }
+
+  # Enumerate the object and listing operations so administrators can manage recordings
+  # without changing the audit bucket policy or encryption, or deleting the bucket.
+  dynamic "statement" {
+    for_each = local.has_admin_iam_roles ? [1] : []
+    content {
+      sid = "AllowIAMAdminRolesAccess"
+      actions = [
         "s3:GetObject",
         "s3:GetObjectVersion",
         "s3:GetObjectAttributes",
         "s3:GetObjectVersionAttributes",
-        # Create
         "s3:PutObject",
-        # Delete
         "s3:DeleteObject",
         "s3:DeleteObjectVersion",
-        # Multipart, needed for and after large uploads such as RDP recordings
         "s3:AbortMultipartUpload",
         "s3:ListMultipartUploadParts",
         "s3:ListBucketMultipartUploads",
-        # List and discovery
         "s3:ListBucket",
         "s3:ListBucketVersions",
         "s3:GetBucketLocation",
-        # Encryption discovery, so a client can resolve the bucket's CMK before writing
         "s3:GetEncryptionConfiguration",
       ]
-      Resource = [
-        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}/*",
-        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
-      ]
-    }] : [],
-    # Resource data sync delivers Inventory data as the service principal, not as a role in
-    # this account, so it needs its own grant even though the bucket is account-owned. The
-    # two statements are gated separately because they carry different shapes, and a single
-    # conditional returning a two element tuple has no consistent type with the empty one.
-    local.resource_data_sync_uses_audit_bucket ? [{
-      Sid    = "SSMBucketPermissionsCheck"
-      Effect = "Allow"
-      Principal = {
-        Service = "ssm.amazonaws.com"
-      }
-      Action   = "s3:GetBucketAcl"
-      Resource = "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}"
-    }] : [],
-    local.resource_data_sync_uses_audit_bucket ? [{
-      Sid    = "SSMBucketDelivery"
-      Effect = "Allow"
-      Principal = {
-        Service = "ssm.amazonaws.com"
-      }
-      Action   = "s3:PutObject"
-      Resource = local.resource_data_sync_object_pattern
-      # No s3:x-amz-acl condition: ACLs are disabled on this bucket, and AWS documents that
-      # requiring the canned ACL denies callers that correctly omit it. aws:SourceAccount
-      # and aws:SourceArn remain the real constraints.
-      Condition = {
-        StringEquals = {
-          "aws:SourceAccount" = data.aws_caller_identity.current.account_id
-        }
-        ArnLike = {
-          "aws:SourceArn" = "arn:${data.aws_partition.current.partition}:ssm:*:${data.aws_caller_identity.current.account_id}:resource-data-sync/*"
-        }
-      }
-    }] : [],
-    # Fleet Manager Remote Desktop recordings are uploaded by the GUI Connect service
-    # principal. The preferences schema carries no key prefix, so the grant has to cover the
-    # bucket as a whole — which is also why the session log lifecycle rule above is scoped
-    # to its own prefix rather than left bucket-wide.
-    local.rdp_recording_uses_audit_bucket ? [{
-      Sid    = "ConnectionRecording"
-      Effect = "Allow"
-      Principal = {
-        Service = "ssm-guiconnect.amazonaws.com"
-      }
-      Action = "s3:PutObject"
-      Resource = [
-        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}",
-        "arn:${data.aws_partition.current.partition}:s3:::${local.ssm_logs_bucket}/*"
-      ]
-      Condition = {
-        StringEquals = {
-          "aws:SourceAccount" = data.aws_caller_identity.current.account_id
-        }
-      }
-    }] : []
-  )
+      resources = local.audit_bucket_and_objects
 
-  attach_bucket_policy = length(local.bucket_policy_statements) > 0
+      principals {
+        type        = "AWS"
+        identifiers = local.admin_role_principals
+      }
+    }
+  }
+
+  # SSM delivers Inventory as a service principal.
+  dynamic "statement" {
+    for_each = local.resource_data_sync_uses_audit_bucket ? [1] : []
+    content {
+      sid       = "SSMBucketPermissionsCheck"
+      actions   = ["s3:GetBucketAcl"]
+      resources = [local.audit_bucket_arn]
+
+      principals {
+        type        = "Service"
+        identifiers = ["ssm.amazonaws.com"]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.resource_data_sync_uses_audit_bucket ? [1] : []
+    content {
+      sid       = "SSMBucketDelivery"
+      actions   = ["s3:PutObject"]
+      resources = [replace(local.resource_data_sync_object_pattern, "{", local.escaped_policy_brace)]
+
+      principals {
+        type        = "Service"
+        identifiers = ["ssm.amazonaws.com"]
+      }
+
+      # The bucket disables ACLs. Scope writes to this account's resource data sync.
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+      condition {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values   = ["arn:${data.aws_partition.current.partition}:ssm:*:${data.aws_caller_identity.current.account_id}:resource-data-sync/*"]
+      }
+    }
+  }
+
+  # GUI Connect recording preferences provide a bucket without an object prefix.
+  dynamic "statement" {
+    for_each = local.rdp_recording_uses_audit_bucket ? [1] : []
+    content {
+      sid       = "ConnectionRecording"
+      actions   = ["s3:PutObject"]
+      resources = local.audit_bucket_and_objects
+
+      principals {
+        type        = "Service"
+        identifiers = ["ssm-guiconnect.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceAccount"
+        values   = [data.aws_caller_identity.current.account_id]
+      }
+    }
+  }
 }
 
 resource "random_string" "random" {
@@ -171,10 +178,7 @@ module "ssm_bucket" {
   attach_require_latest_tls_policy      = true
   attach_deny_insecure_transport_policy = true
   attach_policy                         = local.attach_bucket_policy
-  policy = local.attach_bucket_policy ? jsonencode({
-    Version   = "2012-10-17"
-    Statement = local.bucket_policy_statements
-  }) : null
+  policy                                = local.attach_bucket_policy ? replace(data.aws_iam_policy_document.audit_bucket.json, local.escaped_policy_brace, "{") : null
 
   # BucketOwnerEnforced, not BucketOwnerPreferred. Under Preferred the bucket owner only
   # takes ownership of an object when the uploader sets the bucket-owner-full-control ACL,

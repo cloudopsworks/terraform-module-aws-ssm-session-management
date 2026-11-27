@@ -76,15 +76,31 @@
 #       windows_updates: "Enabled"                  # (Optional) Collect installed Windows updates. Windows only. Values: Enabled, Disabled. Default: "Enabled"
 #       files: ""                                   # (Optional) JSON string selecting files to inventory, e.g. '[{"Path":"/usr/bin","Pattern":["*ssm*"],"Recursive":false}]'. Only sent when non-empty. Default: ""
 #       windows_registry: ""                        # (Optional) JSON string selecting Windows registry keys to inventory. Only sent when non-empty. Default: ""
+#     unified_console:                           # (Optional) Manage the unified Systems Manager console through Quick Setup.
+#       enabled: true                          # (Optional) Defaults to whether JIT access is enabled. Set true to keep the console independently or false to use an externally managed console.
+#       name: ""                               # (Optional) Name of the Quick Setup configuration manager. Defaults to a name derived from the system name.
+#       description: ""                        # (Optional) Description of the Quick Setup configuration manager.
+#       target_regions: ""                     # (Optional) Comma-separated target Regions. Defaults to the JIT target Regions or its home Region.
+#       organization_root_id: ""               # (Optional) Organization root ID, for organization mode only. Discovered automatically when omitted.
+#       delegated_account_id: ""               # (Optional) Delegated administrator account ID for the unified console. Omitted by default.
+#       agent_update_schedule: "rate(14 days)"           # (Optional) SSM Agent updates schedule. Defaults to rate(14 days). Set to "none" to disable.
+#       enable_dhmc_schedule: "rate(1 day)"              # (Optional) Default Host Management Configuration schedule. Defaults to rate(1 day). Set to "none" to disable.
+#       inventory_collection_schedule: "rate(12 hours)"  # (Optional) Inventory collection schedule. Defaults to rate(12 hours). Set to "none" to disable.
+#       type_version: ""                       # (Optional) Quick Setup type version. Omit to use the provider or AWS default.
+#       additional_parameters: {}              # (Optional) Extra string parameters from the Quick Setup configuration definition.
+#       deployment_roles:                     # (Optional) Supply a separate existing role pair. Omit to share JIT roles, or set {} to omit both roles for an organization deployment.
+#         administration_role_arn: ""         # (Required for a role pair) ARN of the existing local StackSet administration role.
+#         execution_role_name: ""             # (Required for a role pair) Name of the existing local StackSet execution role with AWSQuickSetupSSMDeploymentRolePolicy.
+#
 #     remote_desktop:                               # (Optional) Fleet Manager Remote Desktop access and recording settings.
-#       just_in_time_node_access:                 # (Optional) Enable just-in-time node access for Fleet Manager through Quick Setup. Requires the unified Systems Manager console.
+#       just_in_time_node_access:                 # (Optional) Enable just-in-time node access for Fleet Manager through Quick Setup. Enables the unified console by default.
 #         enabled: false                          # (Optional) Set up just-in-time node access with or without recording. Required when recording is enabled. Default: false
 #         organization_level: false               # (Optional) Whether to set just-in-time node access up across organizational units rather than for this account alone. When true the module must be applied from the Systems Manager delegated administrator account and target_organizational_units is required; when false it targets target_accounts instead. Default: false
 #         target_organizational_units: ""         # (Required when organization_level is true) Comma separated list of organizational unit IDs to enable just-in-time node access for, e.g. "ou-abcd-11111111,ou-abcd-22222222", or the organization root ID for the whole organization. Not sent when organization_level is false.
 #         target_accounts: ""                     # (Optional, organization_level false only) Comma separated list of account IDs to enable it for. Not sent when organization_level is true. Default: "" (the account this module is applied in)
 #         target_regions: ""                      # (Optional) Comma separated list of regions to enable it in. Must match, or be a subset of, the unified console target regions. Default: "" (the region this module is applied in)
-#         home_region: ""                         # (Optional) Region the unified Systems Manager console aggregates into. Default: "" (the region this module is applied in)
-#         delegated_account_id: ""                # (Optional) Account ID of the Systems Manager delegated administrator. Default: "" (settings.organization.account_id when set, otherwise the current account)
+#         home_region: ""                         # (Optional) Console home Region. Configure awscc in this Region to create or import the managers. Defaults to the aws provider Region.
+#         delegated_account_id: ""                # (Optional) Delegated administrator account ID for JIT. Default: "" (settings.organization.account_id when set, otherwise the current account)
 #         identity_provider: "IAM"                # (Optional) Where the approver identity behind an access request is read from. Values: IAM, SSO. Default: "IAM"
 #         name: ""                                # (Optional) Name of the Quick Setup configuration manager. Default: "" ("<system-name>-jitna")
 #         create_deployment_roles: true           # (Optional) Whether to create the Quick Setup local deployment roles below. Set to false when Quick Setup already created them in this account, since IAM rejects a duplicate role name. An organization level setup then sends no role at all, which AWS permits; a single account setup always sends them, because AWS requires them there. Default: true
