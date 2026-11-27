@@ -640,7 +640,12 @@ Management or another deployment owns one of these tasks for the same nodes, set
 console schedule to `"none"`. [AWS console setup defaults](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-setting-up-single-account-region.html)
 
 The module adds `AWSQuickSetupSSMDeploymentRolePolicy` to the
-shared execution role when it creates the role. Omit `unified_console.deployment_roles` to share
+shared execution role when it creates the role. When JIT and the console share this module-managed
+role, the module also attaches `AWSQuickSetupSSMDeploymentS3BucketRolePolicy` so CloudFormation
+can manage `do-not-delete-ssm-*` buckets in the deployment account.
+[AWS managed policy](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AWSQuickSetupSSMDeploymentS3BucketRolePolicy.html)
+
+Omit `unified_console.deployment_roles` to share
 the JIT role configuration. If the console already uses a different role pair, set
 `unified_console.deployment_roles.administration_role_arn` and `execution_role_name` to the existing
 values. For an organization manager that was deployed with both fields omitted, set

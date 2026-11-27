@@ -81,6 +81,7 @@ locals {
     ["arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSQuickSetupDeploymentRolePolicy"],
     local.jit_node_access_enabled ? ["arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSQuickSetupJITNADeploymentRolePolicy"] : [],
     local.console_uses_jit_roles ? ["arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSQuickSetupSSMDeploymentRolePolicy"] : [],
+    local.jit_node_access_enabled && local.console_uses_jit_roles ? ["arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSQuickSetupSSMDeploymentS3BucketRolePolicy"] : [],
     try(local.jit_node_access.additional_policy_arns, []),
   ))
 }

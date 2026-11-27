@@ -112,6 +112,7 @@ run "enable_jit_without_recording" {
       "arn:aws:iam::aws:policy/AWSQuickSetupDeploymentRolePolicy",
       "arn:aws:iam::aws:policy/AWSQuickSetupJITNADeploymentRolePolicy",
       "arn:aws:iam::aws:policy/AWSQuickSetupSSMDeploymentRolePolicy",
+      "arn:aws:iam::aws:policy/AWSQuickSetupSSMDeploymentS3BucketRolePolicy",
     ])
     error_message = "The shared execution role must grant deployment permissions for JIT and the unified console."
   }
@@ -451,7 +452,10 @@ run "use_existing_unified_console" {
       length(awscc_ssmquicksetup_configuration_manager.unified_console) == 0 &&
       output.unified_console_quicksetup_manager_arn == "" &&
       length(awscc_iam_role_policy.console_diagnosis_untag) == 0 &&
-      !contains(keys(aws_iam_role_policy_attachment.jit_node_access_execution), "arn:aws:iam::aws:policy/AWSQuickSetupSSMDeploymentRolePolicy")
+      toset(keys(aws_iam_role_policy_attachment.jit_node_access_execution)) == toset([
+        "arn:aws:iam::aws:policy/AWSQuickSetupDeploymentRolePolicy",
+        "arn:aws:iam::aws:policy/AWSQuickSetupJITNADeploymentRolePolicy",
+      ])
     )
     error_message = "An explicit console opt-out must leave the existing console external and preserve JIT deployment."
   }
