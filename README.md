@@ -124,6 +124,19 @@ It also runs in a second, mutually exclusive mode: when `settings.organization.d
 module creates **only** the SSM delegated administrator registrations in the Organizations management
 account, and none of the session logging or Fleet Manager resources.
 
+## CloudFormation security recommendations for Quick Setup
+
+Quick Setup uses StackSets for Default Host Management, Host Management, Patch Policy and Fleet Manager
+just-in-time node access. Review these Security Hub controls in each target account and Region.
+
+- **CloudFormation.3 — termination protection.** Enable protection on each root stack after deployment.
+  Nested stacks inherit it. Disable protection before removing a target or deleting its configuration.
+  [AWS stack protection guidance](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-protect-stacks.html)
+- **CloudFormation.4 — stack service role.** Use a least-privilege service role for stacks you manage directly.
+  AWS cannot set the stack's `RoleARN` on service-managed StackSet instances, so these instances fail the
+  control even when Quick Setup has a deployment role. Account for this limitation before choosing an
+  organization-wide JIT rollout. [AWS Security Hub control](https://docs.aws.amazon.com/securityhub/latest/userguide/cloudformation-controls.html#cloudformation-4)
+
 ## Usage
 
 
