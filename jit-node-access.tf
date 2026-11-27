@@ -7,9 +7,7 @@
 #     Distributed Under Apache v2.0 License
 #
 
-# Fleet Manager JIT access and RDP recording are separate settings. The JIT Quick Setup
-# configuration targets accounts and Regions already covered by the unified SSM console.
-# Existing installations can reuse their Quick Setup deployment roles.
+# Fleet Manager JIT access and RDP recording are separate settings.
 locals {
   remote_desktop  = try(var.settings.fleet_manager.remote_desktop, {})
   recording       = try(local.remote_desktop.recording, {})
@@ -69,7 +67,7 @@ locals {
   jit_administration_role_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.jit_administration_role_name}"
   jit_execution_role_arn      = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.jit_execution_role_name}"
 
-  jit_create_deployment_roles = local.jit_node_access_enabled && try(local.jit_node_access.create_deployment_roles, true)
+  jit_create_deployment_roles = (local.jit_node_access_enabled || local.console_uses_jit_roles) && try(local.jit_node_access.create_deployment_roles, true)
 
   # AWS lets the local deployment roles be omitted for an organization level deployment of any
   # type but a patch policy, and requires them for every single account deployment. They are
@@ -78,16 +76,11 @@ locals {
   # than naming roles this module cannot confirm exist.
   jit_pass_deployment_roles = local.jit_create_deployment_roles || !local.jit_organization_level
 
-  # AWSQuickSetupDeploymentRolePolicy covers the StackSet plumbing every configuration type
-  # shares but stops short of JIT node access: it grants nothing on the
-  # AWSQuickSetupType-SetupJITNAResources document or the AWS-QuickSetup-EnableJITNA-* roles
-  # the deployment creates. AWSQuickSetupJITNADeploymentRolePolicy is what covers those, so
-  # both are attached.
+  # Each configuration type requires its own permissions in addition to the shared StackSet policy.
   jit_execution_role_policy_arns = distinct(concat(
-    [
-      "arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSQuickSetupDeploymentRolePolicy",
-      "arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSQuickSetupJITNADeploymentRolePolicy",
-    ],
+    ["arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSQuickSetupDeploymentRolePolicy"],
+    local.jit_node_access_enabled ? ["arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSQuickSetupJITNADeploymentRolePolicy"] : [],
+    local.console_uses_jit_roles ? ["arn:${data.aws_partition.current.partition}:iam::aws:policy/AWSQuickSetupSSMDeploymentRolePolicy"] : [],
     try(local.jit_node_access.additional_policy_arns, []),
   ))
 }
@@ -204,6 +197,15 @@ resource "awscc_ssmquicksetup_configuration_manager" "jit_node_access" {
   ]
 
   lifecycle {
+    # Quick Setup reports deployment readiness separately from Cloud Control request completion.
+    precondition {
+      condition = local.unified_console_enabled ? try(one([
+        for summary in data.awscc_ssmquicksetup_configuration_manager.unified_console[0].status_summaries :
+        summary.status if summary.status_type == "Deployment"
+      ]) == "SUCCEEDED", false) : true
+      error_message = "The unified console deployment must reach SUCCEEDED before JIT can start. Check the console manager in Quick Setup, resolve any deployment errors, and apply again when it is ready."
+    }
+
     precondition {
       condition     = !local.jit_organization_level || local.jit_target_organizational_units != ""
       error_message = "Set just_in_time_node_access.target_organizational_units to the target OUs or organization root when organization_level is true."

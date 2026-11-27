@@ -127,6 +127,11 @@ output "remote_desktop_recording_kms_key_arn" {
   value       = local.rdp_recording_enabled ? local.rdp_recording_kms_key_arn : ""
 }
 
+output "unified_console_quicksetup_manager_arn" {
+  description = "ARN of the unified Systems Manager console configuration manager. Empty when this module does not manage the console."
+  value       = try(awscc_ssmquicksetup_configuration_manager.unified_console[0].manager_arn, "")
+}
+
 output "jit_node_access_quicksetup_manager_arn" {
   description = "ARN of the Quick Setup configuration manager enabling just-in-time node access. Empty when just-in-time node access is disabled."
   value       = try(awscc_ssmquicksetup_configuration_manager.jit_node_access[0].manager_arn, "")
