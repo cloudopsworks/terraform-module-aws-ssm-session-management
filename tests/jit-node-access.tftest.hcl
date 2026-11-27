@@ -468,6 +468,7 @@ run "use_existing_unified_console" {
       length(awscc_ssmquicksetup_configuration_manager.unified_console) == 0 &&
       output.unified_console_quicksetup_manager_arn == "" &&
       length(data.awscc_ssmquicksetup_configuration_manager.unified_console) == 0 &&
+      length(awscc_iam_role_policy.console_diagnosis_untag) == 0 &&
       !contains(keys(aws_iam_role_policy_attachment.jit_node_access_execution), "arn:aws:iam::aws:policy/AWSQuickSetupSSMDeploymentRolePolicy")
     )
     error_message = "An explicit console opt-out must leave the existing console external and preserve JIT deployment."
@@ -505,6 +506,14 @@ run "enable_unified_console_without_jit" {
   }
 
   assert {
+    condition = (
+      awscc_iam_role_policy.console_diagnosis_untag[0].role_name == aws_iam_role.jit_node_access_execution[0].name &&
+      one(jsondecode(awscc_iam_role_policy.console_diagnosis_untag[0].policy_document).Statement).Resource == ["arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1"]
+    )
+    error_message = "A standalone console must grant its execution role access to untag the local diagnosis role."
+  }
+
+  assert {
     condition = one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).parameters == tomap({
       AgentUpdateSchedule         = "none"
       EnableDHMCSchedule          = "none"
@@ -515,6 +524,80 @@ run "enable_unified_console_without_jit" {
     })
     error_message = "The unified console must preserve explicit off and custom schedules and omit a null delegated account."
   }
+}
+
+run "scope_console_diagnosis_untag_to_exact_account_and_regions" {
+  command = plan
+
+  variables {
+    settings = {
+      fleet_manager = {
+        enabled = true
+        unified_console = {
+          organization_root_id = "r-wxyz"
+          target_regions       = "us-east-1,us-west-2,us-east-1"
+        }
+        remote_desktop = {
+          just_in_time_node_access = {
+            enabled                     = true
+            organization_level          = true
+            target_organizational_units = "ou-abcd-11111111"
+            target_regions              = "us-east-1,us-west-2"
+            home_region                 = "eu-west-1"
+            delegated_account_id        = "345678901234"
+            execution_role_name         = "shared-console-execution"
+          }
+        }
+      }
+    }
+  }
+
+  assert {
+    condition     = awscc_iam_role_policy.console_diagnosis_untag[0].role_name == "shared-console-execution"
+    error_message = "The untag policy must attach to the configured shared execution role."
+  }
+
+  assert {
+    condition = jsondecode(awscc_iam_role_policy.console_diagnosis_untag[0].policy_document) == {
+      Version = "2012-10-17"
+      Statement = [{
+        Effect = "Allow"
+        Action = "iam:UntagRole"
+        Resource = [
+          "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-eu-west-1",
+          "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1",
+          "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-west-2",
+        ]
+      }]
+    }
+    error_message = "The policy must allow only iam:UntagRole for the deployment account's exact diagnosis roles in the home and target Regions."
+  }
+}
+
+run "reject_wildcard_console_diagnosis_region" {
+  command = plan
+
+  variables {
+    settings = {
+      fleet_manager = {
+        enabled = true
+        unified_console = {
+          organization_root_id = "r-wxyz"
+          target_regions       = "us-east-1,*"
+        }
+        remote_desktop = {
+          just_in_time_node_access = {
+            enabled                     = true
+            organization_level          = true
+            target_organizational_units = "ou-abcd-11111111"
+            target_regions              = "us-east-1"
+          }
+        }
+      }
+    }
+  }
+
+  expect_failures = [awscc_iam_role_policy.console_diagnosis_untag]
 }
 
 run "reject_unified_console_missing_jit_region" {
@@ -599,6 +682,7 @@ run "preserve_imported_organization_console_settings" {
     condition = (
       length(aws_iam_role.jit_node_access_administration) == 0 &&
       length(aws_iam_role.jit_node_access_execution) == 0 &&
+      length(awscc_iam_role_policy.console_diagnosis_untag) == 0 &&
       one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).local_deployment_administration_role_arn == "arn:aws:iam::123456789012:role/existing-quicksetup-admin" &&
       one(awscc_ssmquicksetup_configuration_manager.unified_console[0].configuration_definitions).local_deployment_execution_role_name == "existing-quicksetup-execution"
     )
@@ -659,10 +743,13 @@ run "use_separate_console_deployment_roles" {
   }
 
   assert {
-    condition = toset(keys(aws_iam_role_policy_attachment.jit_node_access_execution)) == toset([
-      "arn:aws:iam::aws:policy/AWSQuickSetupDeploymentRolePolicy",
-      "arn:aws:iam::aws:policy/AWSQuickSetupJITNADeploymentRolePolicy",
-    ])
+    condition = (
+      length(awscc_iam_role_policy.console_diagnosis_untag) == 0 &&
+      toset(keys(aws_iam_role_policy_attachment.jit_node_access_execution)) == toset([
+        "arn:aws:iam::aws:policy/AWSQuickSetupDeploymentRolePolicy",
+        "arn:aws:iam::aws:policy/AWSQuickSetupJITNADeploymentRolePolicy",
+      ])
+    )
     error_message = "Independent console roles must leave the JIT execution role's policy set unchanged."
   }
 }

@@ -648,6 +648,27 @@ values. For an organization manager that was deployed with both fields omitted, 
 `AWSQuickSetupSSMDeploymentRolePolicy` in the role's owning stack when the execution role already
 exists, including when using a different role pair for the console.
 
+#### Recover from a diagnosis role tagging failure
+
+If a console StackSet reports `UnauthorizedTaggingOperation` for `iam:UntagRole` on an
+`AWS-SSM-DiagnosisAdminRole`, grant the permission to the **StackSet execution role** named
+in the error. The module adds this grant when it manages the console's shared execution role.
+For an externally managed execution role, add the following statement in its owning stack.
+Replace the example ARN with the diagnosis role ARN for each affected account and Region.
+[AWS Quick Setup SSM deployment policy](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AWSQuickSetupSSMDeploymentRolePolicy.html)
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "iam:UntagRole",
+  "Resource": "arn:aws:iam::123456789012:role/AWS-SSM-DiagnosisAdminRole-123456789012-us-east-1"
+}
+```
+
+After the grant takes effect, open **Systems Manager → Diagnose and remediate → Deployment issues**,
+select the failed deployment and choose **Redeploy**. Wait for the deployment to succeed before
+retrying JIT. [AWS deployment recovery procedure](https://docs.aws.amazon.com/systems-manager/latest/userguide/remediating-deployment-issues.html)
+
 #### Adopt an existing unified console before the first apply
 
 **Before upgrading a deployment with JIT enabled**, check for a console manager in the home Region.
@@ -1085,6 +1106,7 @@ Available targets:
 | [aws_ssmquicksetup_configuration_manager.dhmc](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [aws_ssmquicksetup_configuration_manager.host](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [aws_ssmquicksetup_configuration_manager.patch](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
+| [awscc_iam_role_policy.console_diagnosis_untag](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/iam_role_policy) | resource |
 | [awscc_ssmguiconnect_preferences.remote_desktop](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmguiconnect_preferences) | resource |
 | [awscc_ssmquicksetup_configuration_manager.jit_node_access](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |
 | [awscc_ssmquicksetup_configuration_manager.unified_console](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs/resources/ssmquicksetup_configuration_manager) | resource |

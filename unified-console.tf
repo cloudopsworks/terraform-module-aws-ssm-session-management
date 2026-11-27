@@ -11,9 +11,10 @@ locals {
   unified_console         = try(var.settings.fleet_manager.unified_console, {})
   unified_console_enabled = local.fleet_manager_enabled && coalesce(try(local.unified_console.enabled, null), local.jit_node_access_enabled)
 
-  unified_console_regions = coalesce(try(local.unified_console.target_regions, null), local.jit_target_regions)
-  console_root_override   = try(coalesce(local.unified_console.organization_root_id), "")
-  unified_console_root_id = local.console_root_override != "" ? local.console_root_override : try(data.aws_organizations_organization.unified_console[0].roots[0].id, "")
+  unified_console_regions   = coalesce(try(local.unified_console.target_regions, null), local.jit_target_regions)
+  console_diagnosis_regions = toset([for region in concat([local.jit_home_region], split(",", local.unified_console_regions)) : trimspace(region)])
+  console_root_override     = try(coalesce(local.unified_console.organization_root_id), "")
+  unified_console_root_id   = local.console_root_override != "" ? local.console_root_override : try(data.aws_organizations_organization.unified_console[0].roots[0].id, "")
 
   # A console enabled before JIT may have its own pair of deployment roles.
   console_role_override  = try(local.unified_console.deployment_roles, null)
@@ -46,6 +47,31 @@ data "aws_organizations_organization" "unified_console" {
   count = local.unified_console_enabled && local.jit_organization_level && local.console_root_override == "" ? 1 : 0
 }
 
+# The SSM deployment policy grants TagRole on diagnosis roles but omits UntagRole.
+resource "awscc_iam_role_policy" "console_diagnosis_untag" {
+  count       = local.console_uses_jit_roles && local.jit_create_deployment_roles ? 1 : 0
+  role_name   = aws_iam_role.jit_node_access_execution[0].name
+  policy_name = "QuickSetupSSMDiagnosisAdminUntag"
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = "iam:UntagRole"
+      Resource = [
+        for region in local.console_diagnosis_regions :
+        "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/AWS-SSM-DiagnosisAdminRole-${data.aws_caller_identity.current.account_id}-${region}"
+      ]
+    }]
+  })
+
+  lifecycle {
+    precondition {
+      condition     = alltrue([for region in local.console_diagnosis_regions : can(regex("^[a-z0-9-]+$", region))])
+      error_message = "Use literal AWS Region names for the unified console home and target Regions so the IAM policy can name each diagnosis role exactly."
+    }
+  }
+}
+
 resource "awscc_ssmquicksetup_configuration_manager" "unified_console" {
   count       = local.unified_console_enabled ? 1 : 0
   name        = coalesce(try(local.unified_console.name, null), "${local.system_name}-ssm-console")
@@ -63,6 +89,7 @@ resource "awscc_ssmquicksetup_configuration_manager" "unified_console" {
   depends_on = [
     aws_iam_role_policy.jit_node_access_administration,
     aws_iam_role_policy_attachment.jit_node_access_execution,
+    awscc_iam_role_policy.console_diagnosis_untag,
   ]
 
   lifecycle {
